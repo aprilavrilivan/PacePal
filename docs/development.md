@@ -48,10 +48,12 @@ Never prefix a secret with `NEXT_PUBLIC_`; Next.js includes such values in brows
 
 ## Vercel deployment
 
+Production: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
+
 1. Import the GitHub repository into Vercel.
 2. Keep the detected framework as Next.js.
 3. Add `AI_PROVIDER=mock` for the first deployment.
-4. Set `NEXT_PUBLIC_APP_URL` after Vercel assigns the production domain.
+4. Set `NEXT_PUBLIC_APP_URL=https://pace-pal-eta.vercel.app` for Production.
 5. Add server secrets only through Vercel environment settings.
 6. Use Preview deployments for branches and Production for `main`.
 

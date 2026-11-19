@@ -14,6 +14,8 @@ The companion pet is a gentle interaction layer across that loop. PacePal is a p
 
 The repository contains the agreed MVP baseline and a deployable Next.js foundation with mock-first environment configuration, automated quality checks, unit tests, browser tests, and a health endpoint.
 
+Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
+
 ## Technology
 
 - Next.js App Router and React
@@ -23,7 +25,7 @@ The repository contains the agreed MVP baseline and a deployable Next.js foundat
 - Vitest and Testing Library
 - Playwright
 - GitHub Actions
-- Vercel deployment configuration
+- Vercel deployment from the `main` branch
 
 ## Start locally
 
