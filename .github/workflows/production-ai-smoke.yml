@@ -6,6 +6,12 @@ on:
     branches: [main]
     paths:
       - .github/workflows/production-ai-smoke.yml
+      - package-lock.json
+      - package.json
+      - src/app/api/plan/route.ts
+      - src/features/pacepal/gateway-error.ts
+      - src/features/pacepal/gateway-planner.ts
+      - src/features/pacepal/plan-api.ts
 
 permissions:
   contents: read

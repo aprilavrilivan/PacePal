@@ -49,9 +49,13 @@ export async function generateGatewayPlan(
     abortSignal: AbortSignal.timeout(50_000),
     maxOutputTokens: 4096,
     model: gatewayModel,
-    output: Output.object({ schema: generatedPlanSchema }),
+    output: Output.object({
+      description: "A sequential assignment plan containing 4 to 12 tasks.",
+      name: "assignment_plan",
+      schema: generatedPlanSchema,
+    }),
     prompt: buildPrompt(assignment),
-    reasoning: "high",
+    reasoning: "none",
     system:
       "You are PacePal, a concise academic planning assistant. Keep student control and academic integrity central.",
   });
