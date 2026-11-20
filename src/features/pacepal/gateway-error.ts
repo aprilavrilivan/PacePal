@@ -22,3 +22,38 @@ export function classifyGatewayFailure(error: unknown): GatewayFailureReason {
     "gateway-error"
   );
 }
+import { NoObjectGeneratedError } from "ai";
+import { ZodError } from "zod";
+
+export function describeGatewayFailure(error: unknown) {
+  if (NoObjectGeneratedError.isInstance(error)) {
+    return {
+      cause:
+        error.cause instanceof Error
+          ? {
+              message: error.cause.message.slice(0, 500),
+              name: error.cause.name,
+            }
+          : null,
+      finishReason: error.finishReason,
+      generatedTextLength: error.text?.length ?? 0,
+      type: "no-object-generated",
+    };
+  }
+
+  if (error instanceof ZodError) {
+    return {
+      issues: error.issues.map((issue) => ({
+        code: issue.code,
+        message: issue.message,
+        path: issue.path,
+      })),
+      type: "validation",
+    };
+  }
+
+  return {
+    name: error instanceof Error ? error.name : typeof error,
+    type: "gateway-error",
+  };
+}
