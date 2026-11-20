@@ -80,10 +80,10 @@ These decisions convert the product brief into an implementation boundary. Chang
 
 **Boundary:** Signed-out work remains browser-local. On first sign-in it is migrated only when the account has no cloud state. Existing cloud data always takes precedence, preventing an old device from silently overwriting another device's plan.
 
-## PD-013 — Claude Fable 5.2 for live task planning
+## PD-013 — Nemotron 3.5 Lightning Free for live task planning
 
-**Decision:** Stage 6 uses Claude Fable 5.2 through Vercel AI Gateway. The model returns schema-constrained task data, which PacePal validates before showing it. Vercel production authenticates with its short-lived OIDC token, so PacePal stores no persistent model API key. Scheduling remains deterministic and separate from the model.
+**Decision:** Stage 6 uses NVIDIA Nemotron 3.5 Lightning Free through Vercel AI Gateway. The model returns schema-constrained task data, which PacePal validates before showing it. Vercel production authenticates with its short-lived OIDC token, so PacePal stores no persistent model API key. Scheduling remains deterministic and separate from the model.
 
-**Reason:** It currently leads broad frontier-model intelligence comparisons and is available through Vercel's included monthly AI Gateway credit. It offers adaptive reasoning, a one-million-token context window, and structured output support.
+**Reason:** It is a capable reasoning model with an explicitly free Vercel endpoint, a one-million-token context window, fast generation, and structured output support. This keeps the core planning flow usable without paid model usage.
 
-**Boundary:** The included credit is limited and assignment content is processed by Vercel and Anthropic. Model or quota failures fall back to the deterministic plan without erasing user input. No model credential is exposed to the browser.
+**Boundary:** The free endpoint is a trial service, and NVIDIA may retain prompts and responses for product improvement. Users must not enter personal, confidential, or sensitive information. Model availability, rate-limit, or output failures fall back to the deterministic plan without erasing user input. No model credential is exposed to the browser.

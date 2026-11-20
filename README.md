@@ -33,7 +33,7 @@ Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 - Zod environment validation
 - Zod plan and persisted-state validation
 - Supabase Auth, Postgres, and row-level security
-- Claude Fable 5.2 task planning through Vercel AI Gateway
+- Nemotron 3.5 Lightning Free task planning through Vercel AI Gateway
 - Deterministic scheduling engine
 - Vitest and Testing Library
 - Playwright

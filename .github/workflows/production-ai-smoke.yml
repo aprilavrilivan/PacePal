@@ -46,6 +46,6 @@ jobs:
           jq '{fallback, fallbackReason, model, subtaskCount: (.subtasks | length)}' <<<"$response"
           jq -e '
             .fallback == false and
-            .model == "anthropic/claude-fable-5.2" and
+            .model == "nvidia/nemotron-3.5-lightning-free" and
             (.subtasks | length >= 4)
           ' <<<"$response" >/dev/null

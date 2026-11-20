@@ -10,7 +10,7 @@ import {
 } from "@/features/pacepal/model";
 import { buildSubtasks } from "@/features/pacepal/plan-api";
 
-export const gatewayModel = "anthropic/claude-fable-5.2";
+export const gatewayModel = "nvidia/nemotron-3.5-lightning-free";
 
 const generatedTaskSchema = z.object({
   completionCriteria: z.string().trim().min(1).max(160),
