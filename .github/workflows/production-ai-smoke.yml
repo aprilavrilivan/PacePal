@@ -21,7 +21,11 @@ jobs:
         run: |
           for attempt in {1..30}; do
             health="$(curl -fsS --max-time 15 https://pace-pal-eta.vercel.app/api/health || true)"
-            if jq -e '.status == "ok" and .aiProvider == "gateway"' <<<"$health" >/dev/null; then
+            if jq -e --arg sha "$GITHUB_SHA" '
+              .status == "ok" and
+              .aiProvider == "gateway" and
+              .commitSha == $sha
+            ' <<<"$health" >/dev/null; then
               exit 0
             fi
             sleep 10
