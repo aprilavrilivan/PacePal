@@ -1,9 +1,9 @@
 import { ZodError } from "zod";
 
 import {
-  generateOpenRouterPlan,
-  openRouterModel,
-} from "@/features/pacepal/openrouter-planner";
+  gatewayModel,
+  generateGatewayPlan,
+} from "@/features/pacepal/gateway-planner";
 import { assignmentInputSchema } from "@/features/pacepal/model";
 import { generateMockPlan } from "@/features/pacepal/mock-planner";
 import { serverEnvironment } from "@/lib/env/server";
@@ -26,14 +26,14 @@ export async function POST(request: Request) {
     try {
       return Response.json({
         fallback: false,
-        model: openRouterModel,
-        subtasks: await generateOpenRouterPlan(input),
+        model: gatewayModel,
+        subtasks: await generateGatewayPlan(input),
       });
     } catch (error) {
-      console.error("OpenRouter plan generation failed", error);
+      console.error("AI Gateway plan generation failed", error);
       return Response.json({
         fallback: true,
-        model: openRouterModel,
+        model: gatewayModel,
         subtasks: generateMockPlan(input),
       });
     }

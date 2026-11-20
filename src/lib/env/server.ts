@@ -1,26 +1,13 @@
 import { z } from "zod";
 
-const serverEnvironmentSchema = z
-  .object({
-    AI_PROVIDER: z.enum(["mock", "openrouter"]).default("mock"),
-    OPENROUTER_API_KEY: z.string().min(1).optional(),
-  })
-  .superRefine((environment, context) => {
-    if (
-      environment.AI_PROVIDER === "openrouter" &&
-      !environment.OPENROUTER_API_KEY
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "OPENROUTER_API_KEY is required when AI_PROVIDER=openrouter.",
-        path: ["OPENROUTER_API_KEY"],
-      });
-    }
-  });
+const serverEnvironmentSchema = z.object({
+  AI_GATEWAY_API_KEY: z.string().min(1).optional(),
+  AI_PROVIDER: z.enum(["mock", "gateway"]).default("mock"),
+});
 
 const parsedEnvironment = serverEnvironmentSchema.safeParse({
+  AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY || undefined,
   AI_PROVIDER: process.env.AI_PROVIDER,
-  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || undefined,
 });
 
 if (!parsedEnvironment.success) {

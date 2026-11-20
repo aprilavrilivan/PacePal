@@ -80,10 +80,10 @@ These decisions convert the product brief into an implementation boundary. Chang
 
 **Boundary:** Signed-out work remains browser-local. On first sign-in it is migrated only when the account has no cloud state. Existing cloud data always takes precedence, preventing an old device from silently overwriting another device's plan.
 
-## PD-013 — Nemotron 3 Ultra for live task planning
+## PD-013 — Claude Fable 5.2 for live task planning
 
-**Decision:** Stage 6 uses NVIDIA Nemotron 3 Ultra through a server-only OpenRouter API key. The model is required to call a task-plan function, and PacePal validates the returned arguments before showing the plan. Scheduling remains deterministic and separate from the model.
+**Decision:** Stage 6 uses Claude Fable 5.2 through Vercel AI Gateway. The model returns schema-constrained task data, which PacePal validates before showing it. Vercel production authenticates with its short-lived OIDC token, so PacePal stores no persistent model API key. Scheduling remains deterministic and separate from the model.
 
-**Reason:** It is one of the strongest current free models available through an API, with frontier-scale reasoning, a one-million-token context window, and an emphasis on multi-step planning.
+**Reason:** It currently leads broad frontier-model intelligence comparisons and is available through Vercel's included monthly AI Gateway credit. It offers adaptive reasoning, a one-million-token context window, and structured output support.
 
-**Boundary:** The free endpoint is rate limited and routes assignment content through OpenRouter and its inference provider. Model or quota failures fall back to the deterministic plan without erasing user input. The API key is never exposed to the browser.
+**Boundary:** The included credit is limited and assignment content is processed by Vercel and Anthropic. Model or quota failures fall back to the deterministic plan without erasing user input. No model credential is exposed to the browser.
