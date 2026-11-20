@@ -33,11 +33,13 @@ const gatewayLanguageModel = wrapLanguageModel({
 });
 
 const modelTaskSchema = z.object({
-  completionCriteria: z.string(),
+  completionCriteria: z.string().optional(),
   description: z.string(),
-  difficulty: z.enum(["low", "medium", "high"]),
-  estimatedMinutes: z.number(),
-  title: z.string(),
+  difficulty: z.enum(["low", "medium", "high"]).optional(),
+  estimated_time: z.union([z.number(), z.string()]).optional(),
+  estimatedMinutes: z.number().optional(),
+  task_name: z.string().optional(),
+  title: z.string().optional(),
 });
 
 const modelPlanSchema = z.object({
@@ -63,18 +65,45 @@ function trimToLength(value: string, maxLength: number) {
   return value.trim().slice(0, maxLength).trim();
 }
 
+function readEstimatedMinutes(task: z.infer<typeof modelTaskSchema>) {
+  if (typeof task.estimatedMinutes === "number") {
+    return task.estimatedMinutes;
+  }
+
+  if (typeof task.estimated_time === "number") {
+    return task.estimated_time;
+  }
+
+  const firstNumber = task.estimated_time?.match(/\d+(?:\.\d+)?/)?.[0];
+  return firstNumber ? Number(firstNumber) : 30;
+}
+
 function normalizePlan(plan: z.infer<typeof modelPlanSchema>) {
   return validatedPlanSchema.parse({
-    tasks: plan.tasks.slice(0, 12).map((task) => ({
-      completionCriteria: trimToLength(task.completionCriteria, 160),
-      description: trimToLength(task.description, 240),
-      difficulty: task.difficulty,
-      estimatedMinutes: Math.min(
+    tasks: plan.tasks.slice(0, 12).map((task) => {
+      const description = trimToLength(task.description, 240);
+      const estimatedMinutes = Math.min(
         240,
-        Math.max(5, Math.round(task.estimatedMinutes)),
-      ),
-      title: trimToLength(task.title, 80),
-    })),
+        Math.max(5, Math.round(readEstimatedMinutes(task))),
+      );
+
+      return {
+        completionCriteria: trimToLength(
+          task.completionCriteria ?? description,
+          160,
+        ),
+        description,
+        difficulty:
+          task.difficulty ??
+          (estimatedMinutes <= 30
+            ? "low"
+            : estimatedMinutes <= 60
+              ? "medium"
+              : "high"),
+        estimatedMinutes,
+        title: trimToLength(task.title ?? task.task_name ?? "", 80),
+      };
+    }),
   });
 }
 
@@ -83,6 +112,8 @@ function buildPrompt(assignment: AssignmentInput) {
     "Create a practical, sequential work plan for this university assignment.",
     "Use the same primary language as the student's input.",
     "Return 4 to 8 tasks.",
+    "For every task use exactly these fields: title, description, estimatedMinutes, completionCriteria, difficulty.",
+    "Do not rename fields. estimatedMinutes must be a number. difficulty must be low, medium, or high.",
     "Each task must be concrete, independently understandable, and small enough to start.",
     "Estimate realistic active work time. Include research, drafting, revision, and submission checks only when relevant.",
     "Do not write the assignment, invent academic claims, or provide submission-ready prose.",
