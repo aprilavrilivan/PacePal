@@ -10,11 +10,19 @@ The companion pet is a gentle interaction layer across that loop. PacePal is a p
 
 ## Project status
 
-**Stage 2 complete: web foundation**
+**Stage 4 complete: local planning workflow**
 
-The repository contains the agreed MVP baseline and a deployable Next.js foundation with mock-first environment configuration, automated quality checks, unit tests, browser tests, and a health endpoint.
+The deployed app now supports assignment creation, validated mock task decomposition, editable task plans, deterministic scheduling, progress updates, and browser-local persistence.
 
 Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
+
+## Current workflow
+
+1. Create one active assignment.
+2. Review and edit the generated task breakdown.
+3. Set daily study time and approve the schedule.
+4. View the next action, task list, and daily plan.
+5. Complete tasks without losing progress after a refresh.
 
 ## Technology
 
@@ -22,6 +30,8 @@ Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 - TypeScript
 - Tailwind CSS
 - Zod environment validation
+- Zod plan and persisted-state validation
+- Deterministic scheduling engine
 - Vitest and Testing Library
 - Playwright
 - GitHub Actions

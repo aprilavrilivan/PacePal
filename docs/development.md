@@ -17,6 +17,10 @@ The application runs at `http://localhost:3000`. The health endpoint is availabl
 
 `AI_PROVIDER` defaults to `mock`; no external model credential is required for foundation development.
 
+## Prototype data
+
+Stages 3 and 4 store the active assignment in the current browser under `pacepal:app-state:v1`. Clearing site data removes it. Account-based cloud persistence is reserved for a later stage.
+
 ## Quality commands
 
 ```bash

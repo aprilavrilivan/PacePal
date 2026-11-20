@@ -1,9 +1,55 @@
 import { expect, test } from "@playwright/test";
 
-test("renders the minimal PacePal foundation", async ({ page }) => {
+test("creates, approves, schedules, and persists an assignment", async ({
+  page,
+}) => {
   await page.goto("/");
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
 
-  await expect(page.getByRole("heading", { name: "PacePal" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "开始你的作业计划" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "创建作业" }).click();
+  await page.getByLabel("作业名称").fill("媒介研究课程论文");
+  await page
+    .getByLabel("作业要求")
+    .fill("分析一个媒介现象，使用至少五个学术来源。");
+  await page.getByLabel("成果形式").fill("2500 字课程论文");
+
+  const deadline = new Date();
+  deadline.setDate(deadline.getDate() + 10);
+  deadline.setHours(18, 0, 0, 0);
+  const localDeadline = `${deadline.getFullYear()}-${String(
+    deadline.getMonth() + 1,
+  ).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`;
+
+  await page.getByLabel("截止时间").fill(localDeadline);
+  await page.getByRole("button", { name: "保存并生成任务" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "确认任务计划" }),
+  ).toBeVisible();
+  await expect(page.getByText("理解作业要求")).toBeVisible();
+  await page.getByRole("button", { name: "确认任务计划" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "安排学习时间" }),
+  ).toBeVisible();
+  await page.getByLabel("每天可用时间").selectOption("60");
+  await page.getByLabel("开始时间").fill("18:00");
+  await page.getByRole("button", { name: "生成安排" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "媒介研究课程论文" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "下一步" })).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "媒介研究课程论文" }),
+  ).toBeVisible();
 });
 
 test("reports a healthy mock foundation", async ({ request }) => {

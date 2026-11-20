@@ -63,3 +63,11 @@ These decisions convert the product brief into an implementation boundary. Chang
 **Reason:** PacePal should reduce cognitive load for students who already feel overwhelmed. Visual noise, nested headings, excessive cards, and explanatory small print would work against that purpose.
 
 **Boundary:** Necessary labels, validation, error recovery, accessibility text, recommendation reasons, and security or consent information remain required, but must be expressed directly and briefly.
+
+## PD-011 — Local-first persistence for stages 3 and 4
+
+**Decision:** The first functional planning workflow stores one active assignment in browser local storage. Mock AI planning and deterministic scheduling remain fully usable without an account or external credential.
+
+**Reason:** This validates assignment creation, plan approval, scheduling, progress, and interface structure before adding authentication and database infrastructure.
+
+**Boundary:** Browser-local data is device-specific and does not satisfy the final MVP's account persistence or user-isolation requirements. It must be migrated to authenticated cloud storage in a later stage.

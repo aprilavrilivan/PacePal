@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "PacePal",
-  description: "A calm, adaptive study planner.",
+  description: "把复杂作业变成可以开始的下一步。",
 };
 
 export default function RootLayout({

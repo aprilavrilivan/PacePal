@@ -37,6 +37,17 @@ textarea {
   font: inherit;
 }
 
+button:not(:disabled),
+select:not(:disabled),
+input[type="checkbox"]:not(:disabled) {
+  cursor: pointer;
+}
+
+::selection {
+  background: #c7d2fe;
+  color: #1e1b4b;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
