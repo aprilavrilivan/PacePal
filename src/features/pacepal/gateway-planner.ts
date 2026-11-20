@@ -1,6 +1,12 @@
 import "server-only";
 
-import { generateText, Output } from "ai";
+import {
+  extractJsonMiddleware,
+  gateway,
+  generateText,
+  Output,
+  wrapLanguageModel,
+} from "ai";
 import { z } from "zod";
 
 import {
@@ -11,6 +17,20 @@ import {
 import { buildSubtasks } from "@/features/pacepal/plan-api";
 
 export const gatewayModel = "nvidia/nemotron-3.5-lightning-free";
+
+const gatewayLanguageModel = wrapLanguageModel({
+  middleware: extractJsonMiddleware({
+    transform(text) {
+      const objectStart = text.indexOf("{");
+      const objectEnd = text.lastIndexOf("}");
+
+      return objectStart >= 0 && objectEnd > objectStart
+        ? text.slice(objectStart, objectEnd + 1)
+        : text;
+    },
+  }),
+  model: gateway(gatewayModel),
+});
 
 const modelTaskSchema = z.object({
   completionCriteria: z.string(),
@@ -83,7 +103,7 @@ export async function generateGatewayPlan(
   const { output } = await generateText({
     abortSignal: AbortSignal.timeout(50_000),
     maxOutputTokens: 4096,
-    model: gatewayModel,
+    model: gatewayLanguageModel,
     output: Output.object({
       description: "A sequential assignment plan containing 4 to 12 tasks.",
       name: "assignment_plan",
