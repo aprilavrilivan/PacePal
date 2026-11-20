@@ -12,22 +12,57 @@ import { buildSubtasks } from "@/features/pacepal/plan-api";
 
 export const gatewayModel = "nvidia/nemotron-3.5-lightning-free";
 
-const generatedTaskSchema = z.object({
-  completionCriteria: z.string().trim().min(1).max(160),
-  description: z.string().trim().min(1).max(240),
+const modelTaskSchema = z.object({
+  completionCriteria: z.string(),
+  description: z.string(),
   difficulty: z.enum(["low", "medium", "high"]),
-  estimatedMinutes: z.number().int().min(5).max(240),
-  title: z.string().trim().min(1).max(80),
+  estimatedMinutes: z.number(),
+  title: z.string(),
 });
 
-const generatedPlanSchema = z.object({
-  tasks: z.array(generatedTaskSchema).min(4).max(12),
+const modelPlanSchema = z.object({
+  tasks: z.array(modelTaskSchema),
 });
+
+const validatedPlanSchema = z.object({
+  tasks: z
+    .array(
+      z.object({
+        completionCriteria: z.string().trim().min(1).max(160),
+        description: z.string().trim().min(1).max(240),
+        difficulty: z.enum(["low", "medium", "high"]),
+        estimatedMinutes: z.number().int().min(5).max(240),
+        title: z.string().trim().min(1).max(80),
+      }),
+    )
+    .min(4)
+    .max(12),
+});
+
+function trimToLength(value: string, maxLength: number) {
+  return value.trim().slice(0, maxLength).trim();
+}
+
+function normalizePlan(plan: z.infer<typeof modelPlanSchema>) {
+  return validatedPlanSchema.parse({
+    tasks: plan.tasks.slice(0, 12).map((task) => ({
+      completionCriteria: trimToLength(task.completionCriteria, 160),
+      description: trimToLength(task.description, 240),
+      difficulty: task.difficulty,
+      estimatedMinutes: Math.min(
+        240,
+        Math.max(5, Math.round(task.estimatedMinutes)),
+      ),
+      title: trimToLength(task.title, 80),
+    })),
+  });
+}
 
 function buildPrompt(assignment: AssignmentInput) {
   return [
     "Create a practical, sequential work plan for this university assignment.",
     "Use the same primary language as the student's input.",
+    "Return 4 to 8 tasks.",
     "Each task must be concrete, independently understandable, and small enough to start.",
     "Estimate realistic active work time. Include research, drafting, revision, and submission checks only when relevant.",
     "Do not write the assignment, invent academic claims, or provide submission-ready prose.",
@@ -52,7 +87,7 @@ export async function generateGatewayPlan(
     output: Output.object({
       description: "A sequential assignment plan containing 4 to 12 tasks.",
       name: "assignment_plan",
-      schema: generatedPlanSchema,
+      schema: modelPlanSchema,
     }),
     prompt: buildPrompt(assignment),
     reasoning: "none",
@@ -60,5 +95,5 @@ export async function generateGatewayPlan(
       "You are PacePal, a concise academic planning assistant. Keep student control and academic integrity central.",
   });
 
-  return buildSubtasks(assignment, output.tasks);
+  return buildSubtasks(assignment, normalizePlan(output).tasks);
 }
