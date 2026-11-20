@@ -35,6 +35,7 @@ jobs:
             -H 'Content-Type: application/json' \
             --data '{"title":"人工智能课程研究计划","requirements":"比较两种方法，完成资料整理、提纲、初稿和复核。","deliverable":"1500 字研究报告","deadline":"2026-12-15T18:00","priority":"high"}' \
             https://pace-pal-eta.vercel.app/api/plan)"
+          jq '{fallback, fallbackReason, model, subtaskCount: (.subtasks | length)}' <<<"$response"
           jq -e '
             .fallback == false and
             .model == "anthropic/claude-fable-5.2" and

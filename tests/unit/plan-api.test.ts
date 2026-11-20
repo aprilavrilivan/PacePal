@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 
+import { classifyGatewayFailure } from "@/features/pacepal/gateway-error";
 import { buildSubtasks } from "@/features/pacepal/plan-api";
+
+describe("classifyGatewayFailure", () => {
+  it.each([
+    ["OIDC token is invalid", "authentication"],
+    ["Insufficient credits", "quota"],
+    ["Request timed out", "timeout"],
+    ["Output schema validation failed", "invalid-output"],
+    ["Provider is unavailable", "unavailable"],
+    ["Unexpected failure", "gateway-error"],
+  ])("classifies %s", (message, expected) => {
+    expect(classifyGatewayFailure(new Error(message))).toBe(expected);
+  });
+});
 
 describe("buildSubtasks", () => {
   it("adds stable ids, status, and sequential dependencies", () => {

@@ -4,6 +4,7 @@ import {
   gatewayModel,
   generateGatewayPlan,
 } from "@/features/pacepal/gateway-planner";
+import { classifyGatewayFailure } from "@/features/pacepal/gateway-error";
 import { assignmentInputSchema } from "@/features/pacepal/model";
 import { generateMockPlan } from "@/features/pacepal/mock-planner";
 import { serverEnvironment } from "@/lib/env/server";
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
       console.error("AI Gateway plan generation failed", error);
       return Response.json({
         fallback: true,
+        fallbackReason: classifyGatewayFailure(error),
         model: gatewayModel,
         subtasks: generateMockPlan(input),
       });
