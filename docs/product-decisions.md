@@ -79,3 +79,11 @@ These decisions convert the product brief into an implementation boundary. Chang
 **Reason:** Passwordless email keeps the account flow small while Supabase provides managed sessions, durable Postgres storage, and database-level user isolation on the free tier.
 
 **Boundary:** Signed-out work remains browser-local. On first sign-in it is migrated only when the account has no cloud state. Existing cloud data always takes precedence, preventing an old device from silently overwriting another device's plan.
+
+## PD-013 — Nemotron 3 Ultra for live task planning
+
+**Decision:** Stage 6 uses NVIDIA Nemotron 3 Ultra through a server-only OpenRouter API key. The model is required to call a task-plan function, and PacePal validates the returned arguments before showing the plan. Scheduling remains deterministic and separate from the model.
+
+**Reason:** It is one of the strongest current free models available through an API, with frontier-scale reasoning, a one-million-token context window, and an emphasis on multi-step planning.
+
+**Boundary:** The free endpoint is rate limited and routes assignment content through OpenRouter and its inference provider. Model or quota failures fall back to the deterministic plan without erasing user input. The API key is never exposed to the browser.

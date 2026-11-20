@@ -19,6 +19,7 @@ import {
   generateMockPlan,
   normalizeDependencies,
 } from "@/features/pacepal/mock-planner";
+import { requestPlan } from "@/features/pacepal/plan-api";
 import { buildSchedule } from "@/features/pacepal/scheduler";
 import {
   clearAppState,
@@ -110,6 +111,8 @@ export function PacePalApp() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [planError, setPlanError] = useState("");
+  const [planNotice, setPlanNotice] = useState("");
+  const [planBusy, setPlanBusy] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [cloudReady, setCloudReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("local");
@@ -310,6 +313,7 @@ export function PacePalApp() {
     setFormMode("create");
     setForm(emptyForm);
     setErrors({});
+    setPlanNotice("");
     setScreen("create");
   }
 
@@ -327,7 +331,7 @@ export function PacePalApp() {
     setScreen("create");
   }
 
-  function handleAssignmentSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleAssignmentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextErrors = validateAssignment(form);
     setErrors(nextErrors);
@@ -349,7 +353,23 @@ export function PacePalApp() {
       return;
     }
 
-    const subtasks = generateMockPlan(form);
+    setPlanBusy(true);
+    setPlanNotice("");
+
+    let subtasks: Subtask[];
+    try {
+      const plan = await requestPlan(form);
+      subtasks = plan.subtasks;
+      if (plan.fallback) {
+        setPlanNotice("AI 暂时不可用，已生成基础计划");
+      }
+    } catch {
+      subtasks = generateMockPlan(form);
+      setPlanNotice("AI 暂时不可用，已生成基础计划");
+    } finally {
+      setPlanBusy(false);
+    }
+
     const nextAssignment: Assignment = {
       ...form,
       id: createId("assignment"),
@@ -730,8 +750,16 @@ export function PacePalApp() {
             </div>
 
             <div className="flex justify-end pt-2">
-              <button className={primaryButtonClassName} type="submit">
-                {formMode === "create" ? "保存并生成任务" : "保存"}
+              <button
+                className={primaryButtonClassName}
+                disabled={planBusy}
+                type="submit"
+              >
+                {planBusy
+                  ? "正在生成"
+                  : formMode === "create"
+                    ? "保存并生成任务"
+                    : "保存"}
               </button>
             </div>
           </form>
@@ -768,6 +796,15 @@ export function PacePalApp() {
               添加任务
             </button>
           </div>
+
+          {planNotice ? (
+            <p
+              className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 font-medium text-amber-900"
+              role="status"
+            >
+              {planNotice}
+            </p>
+          ) : null}
 
           <ol className="mt-8 divide-y divide-slate-200 border-y border-slate-200">
             {assignment.subtasks.map((subtask, index) => (

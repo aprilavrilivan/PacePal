@@ -15,7 +15,7 @@ npm run dev
 
 The application runs at `http://localhost:3000`. The health endpoint is available at `http://localhost:3000/api/health`.
 
-`AI_PROVIDER` defaults to `mock`; no external model credential is required for foundation development.
+`AI_PROVIDER` defaults to `mock`; no external model credential is required for local development or automated tests. Set it to `openrouter` with a server-only `OPENROUTER_API_KEY` to use live task decomposition.
 
 ## Data storage
 
@@ -49,10 +49,12 @@ npm run test:e2e
 | `NEXT_PUBLIC_APP_URL`                  | Browser-safe       | Canonical application URL when deployed   |
 | `NEXT_PUBLIC_SUPABASE_URL`             | Browser-safe       | Supabase project URL                      |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser-safe       | Supabase publishable key protected by RLS |
-| `AI_PROVIDER`                          | Server-only        | Selects `mock` or `openai` behavior       |
-| `OPENAI_API_KEY`                       | Server-only secret | Required only when `AI_PROVIDER=openai`   |
+| `AI_PROVIDER`                          | Server-only        | Selects `mock` or `openrouter` behavior   |
+| `OPENROUTER_API_KEY`                   | Server-only secret | Required for `AI_PROVIDER=openrouter`     |
 
 Never prefix a secret with `NEXT_PUBLIC_`; Next.js includes such values in browser code.
+
+OpenRouter free endpoints are rate limited. PacePal sends assignment details to OpenRouter and the selected inference provider, so do not submit confidential or highly sensitive content.
 
 ## Vercel deployment
 
@@ -60,7 +62,7 @@ Production: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 
 1. Import the GitHub repository into Vercel.
 2. Keep the detected framework as Next.js.
-3. Add `AI_PROVIDER=mock` for the first deployment.
+3. Add `AI_PROVIDER=openrouter` and `OPENROUTER_API_KEY` for live planning, or keep `mock` for a credential-free demo.
 4. Set `NEXT_PUBLIC_APP_URL=https://pace-pal-eta.vercel.app` for Production.
 5. Add server secrets only through Vercel environment settings.
 6. Use Preview deployments for branches and Production for `main`.

@@ -10,9 +10,9 @@ The companion pet is a gentle interaction layer across that loop. PacePal is a p
 
 ## Project status
 
-**Stage 5 complete: account and cloud persistence**
+**Stage 6 complete: live AI task planning**
 
-The deployed app supports assignment creation, validated mock task decomposition, editable task plans, deterministic scheduling, progress updates, passwordless email sign-in, and user-isolated cloud persistence.
+The deployed app supports assignment creation, AI-powered task decomposition, validated editable plans, deterministic fallback planning and scheduling, progress updates, passwordless email sign-in, and user-isolated cloud persistence.
 
 Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 
@@ -33,6 +33,7 @@ Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 - Zod environment validation
 - Zod plan and persisted-state validation
 - Supabase Auth, Postgres, and row-level security
+- NVIDIA Nemotron 3 Ultra task planning through OpenRouter
 - Deterministic scheduling engine
 - Vitest and Testing Library
 - Playwright
