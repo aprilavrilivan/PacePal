@@ -71,3 +71,11 @@ These decisions convert the product brief into an implementation boundary. Chang
 **Reason:** This validates assignment creation, plan approval, scheduling, progress, and interface structure before adding authentication and database infrastructure.
 
 **Boundary:** Browser-local data is device-specific and does not satisfy the final MVP's account persistence or user-isolation requirements. It must be migrated to authenticated cloud storage in a later stage.
+
+## PD-012 — Passwordless account and cloud persistence
+
+**Decision:** Stage 5 uses Supabase passwordless email authentication and one JSONB application-state row per user. PostgreSQL row-level security restricts every read and write to `auth.uid() = user_id`.
+
+**Reason:** Passwordless email keeps the account flow small while Supabase provides managed sessions, durable Postgres storage, and database-level user isolation on the free tier.
+
+**Boundary:** Signed-out work remains browser-local. On first sign-in it is migrated only when the account has no cloud state. Existing cloud data always takes precedence, preventing an old device from silently overwriting another device's plan.

@@ -10,9 +10,9 @@ The companion pet is a gentle interaction layer across that loop. PacePal is a p
 
 ## Project status
 
-**Stage 4 complete: local planning workflow**
+**Stage 5 complete: account and cloud persistence**
 
-The deployed app now supports assignment creation, validated mock task decomposition, editable task plans, deterministic scheduling, progress updates, and browser-local persistence.
+The deployed app supports assignment creation, validated mock task decomposition, editable task plans, deterministic scheduling, progress updates, passwordless email sign-in, and user-isolated cloud persistence.
 
 Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 
@@ -23,6 +23,7 @@ Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 3. Set daily study time and approve the schedule.
 4. View the next action, task list, and daily plan.
 5. Complete tasks without losing progress after a refresh.
+6. Sign in to migrate the local plan and use it on another device.
 
 ## Technology
 
@@ -31,6 +32,7 @@ Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 - Tailwind CSS
 - Zod environment validation
 - Zod plan and persisted-state validation
+- Supabase Auth, Postgres, and row-level security
 - Deterministic scheduling engine
 - Vitest and Testing Library
 - Playwright

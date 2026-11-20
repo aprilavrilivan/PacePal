@@ -1,7 +1,12 @@
 "use client";
 
+import type { User } from "@supabase/supabase-js";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
+import {
+  loadCloudState,
+  saveCloudState,
+} from "@/features/pacepal/cloud-storage";
 import {
   emptyAppState,
   type Assignment,
@@ -17,12 +22,18 @@ import {
 import { buildSchedule } from "@/features/pacepal/scheduler";
 import {
   clearAppState,
+  clearAppStateOwner,
   loadAppState,
+  loadAppStateOwner,
   saveAppState,
+  saveAppStateOwner,
 } from "@/features/pacepal/storage";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 
-type Screen = "dashboard" | "create" | "plan" | "availability";
+type Screen = "dashboard" | "create" | "plan" | "availability" | "account";
 type DashboardView = "today" | "tasks" | "schedule";
+type SyncStatus = "local" | "loading" | "saving" | "synced" | "error";
 type FormErrors = Partial<Record<keyof AssignmentInput, string>>;
 
 const emptyForm: AssignmentInput = {
@@ -87,30 +98,125 @@ function validateAssignment(form: AssignmentInput) {
 }
 
 export function PacePalApp() {
+  const cloudEnabled = isSupabaseConfigured();
   const [hydrated, setHydrated] = useState(false);
   const [appState, setAppState] = useState<AppState>(emptyAppState);
   const [screen, setScreen] = useState<Screen>("dashboard");
+  const [accountReturnScreen, setAccountReturnScreen] =
+    useState<Screen>("dashboard");
   const [dashboardView, setDashboardView] = useState<DashboardView>("today");
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [form, setForm] = useState<AssignmentInput>(emptyForm);
   const [errors, setErrors] = useState<FormErrors>({});
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [planError, setPlanError] = useState("");
+  const [user, setUser] = useState<User | null>(null);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("local");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const userId = user?.id ?? null;
 
   useEffect(() => {
-    const loadTimer = window.setTimeout(() => {
-      const storedState = loadAppState();
-      setAppState(storedState);
-      if (storedState.assignment?.status === "planning") setScreen("plan");
-      setHydrated(true);
-    }, 0);
+    let cancelled = false;
 
-    return () => window.clearTimeout(loadTimer);
-  }, []);
+    async function initialize() {
+      let storedState = loadAppState();
+      const storedOwner = loadAppStateOwner();
+
+      if (!cloudEnabled) {
+        if (!cancelled) {
+          setAppState(storedState);
+          if (storedState.assignment?.status === "planning") setScreen("plan");
+          setHydrated(true);
+        }
+        return;
+      }
+
+      try {
+        const client = createSupabaseClient();
+        const { data, error } = await client.auth.getSession();
+        if (error) throw error;
+        const currentUser = data.session?.user ?? null;
+
+        if (!currentUser) {
+          if (storedOwner) {
+            clearAppState();
+            clearAppStateOwner();
+            storedState = emptyAppState;
+          }
+
+          if (!cancelled) {
+            setAppState(storedState);
+            if (storedState.assignment?.status === "planning") {
+              setScreen("plan");
+            }
+            setSyncStatus("local");
+          }
+        } else {
+          const cloudState = await loadCloudState(client, currentUser.id);
+          const canMigrateLocalState =
+            !storedOwner || storedOwner === currentUser.id;
+          const nextState =
+            cloudState ?? (canMigrateLocalState ? storedState : emptyAppState);
+
+          if (!cloudState) {
+            await saveCloudState(client, currentUser.id, nextState);
+          }
+
+          saveAppState(nextState);
+          saveAppStateOwner(currentUser.id);
+
+          if (!cancelled) {
+            setUser(currentUser);
+            setAppState(nextState);
+            setCloudReady(true);
+            setSyncStatus("synced");
+            if (nextState.assignment?.status === "planning") setScreen("plan");
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setAppState(storedOwner ? emptyAppState : storedState);
+          setSyncStatus("error");
+          setAuthError("暂时无法连接云端");
+        }
+      } finally {
+        if (!cancelled) {
+          if (new URLSearchParams(window.location.search).has("auth")) {
+            setScreen("account");
+            window.history.replaceState({}, "", window.location.pathname);
+          }
+          setHydrated(true);
+        }
+      }
+    }
+
+    void initialize();
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudEnabled]);
 
   useEffect(() => {
-    if (hydrated) saveAppState(appState);
-  }, [appState, hydrated]);
+    if (!hydrated) return;
+
+    saveAppState(appState);
+    if (!userId || !cloudReady) return;
+
+    saveAppStateOwner(userId);
+
+    const saveTimer = window.setTimeout(() => {
+      setSyncStatus("saving");
+      void saveCloudState(createSupabaseClient(), userId, appState)
+        .then(() => setSyncStatus("synced"))
+        .catch(() => setSyncStatus("error"));
+    }, 500);
+
+    return () => window.clearTimeout(saveTimer);
+  }, [appState, cloudReady, hydrated, userId]);
 
   const assignment = appState.assignment;
   const completedCount =
@@ -146,6 +252,58 @@ export function PacePalApp() {
       if (!current.assignment) return current;
       return { ...current, assignment: updater(current.assignment) };
     });
+  }
+
+  function openAccount() {
+    setAccountReturnScreen(screen);
+    setAuthError("");
+    setAuthMessage("");
+    setScreen("account");
+  }
+
+  async function sendLoginLink(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!cloudEnabled || !authEmail.trim()) return;
+
+    setAuthBusy(true);
+    setAuthError("");
+    setAuthMessage("");
+
+    const { error } = await createSupabaseClient().auth.signInWithOtp({
+      email: authEmail.trim(),
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        shouldCreateUser: true,
+      },
+    });
+
+    if (error) {
+      setAuthError("登录邮件发送失败，请稍后重试");
+    } else {
+      setAuthMessage("登录邮件已发送");
+    }
+    setAuthBusy(false);
+  }
+
+  async function signOut() {
+    setAuthBusy(true);
+    setAuthError("");
+
+    const { error } = await createSupabaseClient().auth.signOut();
+    if (error) {
+      setAuthError("退出失败，请稍后重试");
+      setAuthBusy(false);
+      return;
+    }
+
+    clearAppState();
+    clearAppStateOwner();
+    setAppState(emptyAppState);
+    setUser(null);
+    setCloudReady(false);
+    setSyncStatus("local");
+    setScreen("dashboard");
+    setAuthBusy(false);
   }
 
   function openCreate() {
@@ -345,6 +503,18 @@ export function PacePalApp() {
     setDashboardView("today");
   }
 
+  const appFrameProps = {
+    accountLabel: user ? "账户" : cloudEnabled ? "登录" : "本机保存",
+    onAccount: openAccount,
+  };
+  const syncStatusText: Record<SyncStatus, string> = {
+    error: "同步失败",
+    loading: "正在加载",
+    local: "本机保存",
+    saving: "正在同步",
+    synced: "云端已同步",
+  };
+
   if (!hydrated) {
     return (
       <main className="grid min-h-dvh place-items-center px-6">
@@ -355,9 +525,112 @@ export function PacePalApp() {
     );
   }
 
+  if (screen === "account") {
+    return (
+      <AppFrame {...appFrameProps}>
+        <div className="mx-auto w-full max-w-md py-10 sm:py-16">
+          <button
+            className={textButtonClassName}
+            onClick={() =>
+              setScreen(
+                accountReturnScreen === "account"
+                  ? "dashboard"
+                  : accountReturnScreen,
+              )
+            }
+            type="button"
+          >
+            返回
+          </button>
+
+          {!cloudEnabled ? (
+            <div className="mt-6">
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+                本机保存
+              </h1>
+              <p className="mt-6 text-slate-600">云端服务尚未配置。</p>
+            </div>
+          ) : user ? (
+            <div className="mt-6">
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+                账户
+              </h1>
+              <dl className="mt-8 divide-y divide-slate-200 border-y border-slate-200">
+                <div className="flex items-center justify-between gap-4 py-4">
+                  <dt className="text-slate-500">邮箱</dt>
+                  <dd className="min-w-0 truncate font-medium text-slate-950">
+                    {user.email}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 py-4">
+                  <dt className="text-slate-500">数据</dt>
+                  <dd className="font-medium text-slate-950">
+                    {syncStatusText[syncStatus]}
+                  </dd>
+                </div>
+              </dl>
+              {authError ? (
+                <p
+                  className="mt-4 text-sm font-medium text-red-700"
+                  role="alert"
+                >
+                  {authError}
+                </p>
+              ) : null}
+              <button
+                className={`${secondaryButtonClassName} mt-8 w-full`}
+                disabled={authBusy}
+                onClick={() => void signOut()}
+                type="button"
+              >
+                退出登录
+              </button>
+            </div>
+          ) : (
+            <div className="mt-6">
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+                登录
+              </h1>
+              <form className="mt-8 space-y-6" onSubmit={sendLoginLink}>
+                <FormField label="邮箱">
+                  <input
+                    autoComplete="email"
+                    className={fieldClassName}
+                    id="auth-email"
+                    onChange={(event) => setAuthEmail(event.target.value)}
+                    required
+                    type="email"
+                    value={authEmail}
+                  />
+                </FormField>
+                {authError ? (
+                  <p className="text-sm font-medium text-red-700" role="alert">
+                    {authError}
+                  </p>
+                ) : null}
+                {authMessage ? (
+                  <p className="font-medium text-emerald-700" role="status">
+                    {authMessage}
+                  </p>
+                ) : null}
+                <button
+                  className={`${primaryButtonClassName} w-full`}
+                  disabled={authBusy}
+                  type="submit"
+                >
+                  {authBusy ? "发送中" : "发送登录链接"}
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+      </AppFrame>
+    );
+  }
+
   if (screen === "create") {
     return (
-      <AppFrame>
+      <AppFrame {...appFrameProps}>
         <div className="mx-auto w-full max-w-2xl py-10 sm:py-16">
           <button
             className={textButtonClassName}
@@ -469,7 +742,7 @@ export function PacePalApp() {
 
   if (screen === "plan" && assignment) {
     return (
-      <AppFrame>
+      <AppFrame {...appFrameProps}>
         <div className="mx-auto w-full max-w-3xl py-10 sm:py-16">
           <button
             className={textButtonClassName}
@@ -585,7 +858,7 @@ export function PacePalApp() {
 
   if (screen === "availability" && assignment) {
     return (
-      <AppFrame>
+      <AppFrame {...appFrameProps}>
         <div className="mx-auto w-full max-w-xl py-10 sm:py-16">
           <button
             className={textButtonClassName}
@@ -652,7 +925,7 @@ export function PacePalApp() {
 
   if (!assignment) {
     return (
-      <AppFrame>
+      <AppFrame {...appFrameProps}>
         <div className="grid min-h-[calc(100dvh-73px)] place-items-center px-6 py-16 text-center">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
@@ -680,7 +953,7 @@ export function PacePalApp() {
   const nextTask = nextBlock ? taskById.get(nextBlock.subtaskId) : null;
 
   return (
-    <AppFrame>
+    <AppFrame {...appFrameProps}>
       <div className="mx-auto w-full max-w-4xl py-8 sm:py-12">
         <div className="flex flex-col gap-5 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -873,14 +1146,29 @@ export function PacePalApp() {
   );
 }
 
-function AppFrame({ children }: { children: React.ReactNode }) {
+function AppFrame({
+  accountLabel,
+  children,
+  onAccount,
+}: {
+  accountLabel: string;
+  children: React.ReactNode;
+  onAccount: () => void;
+}) {
   return (
     <div className="min-h-dvh bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex h-[72px] max-w-5xl items-center px-5 sm:px-8">
+        <div className="mx-auto flex h-[72px] max-w-5xl items-center justify-between px-5 sm:px-8">
           <span className="text-xl font-semibold tracking-tight text-slate-950">
             PacePal
           </span>
+          <button
+            className={textButtonClassName}
+            onClick={onAccount}
+            type="button"
+          >
+            {accountLabel}
+          </button>
         </div>
       </header>
       <main className="px-5 sm:px-8">{children}</main>

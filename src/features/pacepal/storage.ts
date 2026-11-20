@@ -5,6 +5,7 @@ import {
 } from "@/features/pacepal/model";
 
 export const pacePalStorageKey = "pacepal:app-state:v1";
+export const pacePalStorageOwnerKey = "pacepal:app-state-owner:v1";
 
 export function loadAppState(): AppState {
   try {
@@ -24,4 +25,16 @@ export function saveAppState(state: AppState) {
 
 export function clearAppState() {
   window.localStorage.removeItem(pacePalStorageKey);
+}
+
+export function loadAppStateOwner() {
+  return window.localStorage.getItem(pacePalStorageOwnerKey);
+}
+
+export function saveAppStateOwner(userId: string) {
+  window.localStorage.setItem(pacePalStorageOwnerKey, userId);
+}
+
+export function clearAppStateOwner() {
+  window.localStorage.removeItem(pacePalStorageOwnerKey);
 }

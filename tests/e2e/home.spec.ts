@@ -62,3 +62,12 @@ test("reports a healthy mock foundation", async ({ request }) => {
     status: "ok",
   });
 });
+
+test("shows the local storage account state when cloud is not configured", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "本机保存" }).click();
+
+  await expect(page.getByRole("heading", { name: "本机保存" })).toBeVisible();
+});
