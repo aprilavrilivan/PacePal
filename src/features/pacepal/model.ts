@@ -52,6 +52,13 @@ export const checkInSchema = z.object({
   energy: energySchema,
 });
 
+export const chatMessageSchema = z.object({
+  id: z.string().min(1),
+  role: z.enum(["user", "assistant"]),
+  content: z.string().trim().min(1),
+  createdAt: z.string().min(1),
+});
+
 export const assignmentSchema = assignmentInputSchema.extend({
   id: z.string().min(1),
   createdAt: z.string().min(1),
@@ -62,6 +69,7 @@ export const assignmentSchema = assignmentInputSchema.extend({
   unscheduledMinutes: z.number().int().min(0),
   checkIn: checkInSchema.default({ availableMinutes: 30, energy: "medium" }),
   scheduleNotice: z.string().default(""),
+  chatMessages: z.array(chatMessageSchema).default([]),
 });
 
 export const appStateSchema = z.object({
@@ -75,6 +83,7 @@ export type Availability = z.infer<typeof availabilitySchema>;
 export type ScheduleBlock = z.infer<typeof scheduleBlockSchema>;
 export type CheckIn = z.infer<typeof checkInSchema>;
 export type Energy = z.infer<typeof energySchema>;
+export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type Assignment = z.infer<typeof assignmentSchema>;
 export type AppState = z.infer<typeof appStateSchema>;
 

@@ -1,0 +1,62 @@
+import { ZodError } from "zod";
+
+import { classifyGatewayFailure } from "@/features/pacepal/gateway-error";
+import { gatewayModel } from "@/features/pacepal/gateway-planner";
+import { generateGatewayRefinement } from "@/features/pacepal/gateway-refiner";
+import { generateMockRefinement } from "@/features/pacepal/mock-refiner";
+import {
+  refinementRequestSchema,
+  type RefinementOutput,
+} from "@/features/pacepal/refinement";
+import { serverEnvironment } from "@/lib/env/server";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+function unchangedPlan(output: RefinementOutput, fallbackReason: string) {
+  return {
+    ...output,
+    assistantMessage: "这次没有修改计划，请再试一次。",
+    changed: false,
+    fallback: true,
+    fallbackReason,
+    model: gatewayModel,
+  };
+}
+
+export async function POST(request: Request) {
+  try {
+    const { assignment, message } = refinementRequestSchema.parse(
+      await request.json(),
+    );
+    const mockOutput = generateMockRefinement(assignment, message);
+
+    if (serverEnvironment.AI_PROVIDER === "mock") {
+      return Response.json({
+        ...mockOutput,
+        fallback: false,
+        fallbackReason: null,
+        model: null,
+      });
+    }
+
+    try {
+      return Response.json({
+        ...(await generateGatewayRefinement(assignment, message)),
+        fallback: false,
+        fallbackReason: null,
+        model: gatewayModel,
+      });
+    } catch (error) {
+      console.error("AI Gateway refinement failed", error);
+      return Response.json(
+        unchangedPlan(mockOutput, classifyGatewayFailure(error)),
+      );
+    }
+  } catch (error) {
+    if (error instanceof ZodError || error instanceof SyntaxError) {
+      return Response.json({ error: "Invalid refinement." }, { status: 400 });
+    }
+    throw error;
+  }
+}

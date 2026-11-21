@@ -1,6 +1,6 @@
 # PacePal Web MVP Scope
 
-**Status:** Stage 8 implementation baseline
+**Status:** Stage 8 collaborative workspace baseline
 
 **Date:** 2026-11-21
 
@@ -68,6 +68,7 @@ Every MVP feature must follow these rules:
 - Suggest multiple manageable next actions when useful.
 - Further decompose a difficult subtask.
 - Preserve relevant assignment and progress context.
+- Refine the active task list and availability through a persistent conversation.
 - Validate structured model output before displaying or saving it.
 - Require explicit user confirmation before a generated plan becomes active.
 - Provide a deterministic mock mode when no AI credential is configured.

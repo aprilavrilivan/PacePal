@@ -105,3 +105,15 @@ These decisions convert the product brief into an implementation boundary. Chang
 **Decision:** The interface uses cool neutral surfaces, precise spacing, restrained blue state accents, high-contrast primary actions, and subtle depth. Decorative illustration, gradients used as content, redundant subtitles, and explanatory microcopy remain excluded.
 
 **Reason:** A refined visual hierarchy can increase trust and clarity without adding cognitive load or departing from the minimal product boundary.
+
+## PD-017 — Workspace-first information architecture
+
+**Decision:** The active assignment uses a persistent workspace with four destinations: overview, tasks, AI assistant, and schedule. The overview concentrates progress, the recommended next action, current capacity, and today's plan; secondary editing remains outside the primary path.
+
+**Reason:** A stable workspace makes the product feel complete and navigable without adding unrelated dashboards, rewards, statistics, or decorative features.
+
+## PD-018 — Conversational refinement updates the real plan
+
+**Decision:** AI refinement returns a schema-validated complete task proposal and availability. PacePal preserves execution records for unchanged task IDs, validates dependencies, rebuilds the deterministic schedule, and persists the conversation with the assignment.
+
+**Reason:** Chat is useful only when it can safely change the plan the student is actually executing. Keeping scheduling deterministic preserves predictable deadlines and locked commitments.

@@ -9,13 +9,17 @@ on:
       - package-lock.json
       - package.json
       - src/app/api/plan/route.ts
+      - src/app/api/refine/route.ts
       - src/app/globals.css
       - src/components/pacepal-app.tsx
       - src/features/pacepal/execution.ts
       - src/features/pacepal/gateway-error.ts
       - src/features/pacepal/gateway-planner.ts
+      - src/features/pacepal/gateway-refiner.ts
+      - src/features/pacepal/mock-refiner.ts
       - src/features/pacepal/model.ts
       - src/features/pacepal/plan-api.ts
+      - src/features/pacepal/refinement.ts
       - src/features/pacepal/scheduler.ts
 
 permissions:
@@ -47,20 +51,59 @@ jobs:
           done
           exit 1
 
-      - name: Verify live AI task planning
+      - name: Verify live AI planning and refinement
         shell: bash
         run: |
           for attempt in {1..5}; do
+            deadline="$(date -u -d '+21 days' '+%Y-%m-%dT18:00:00.000Z')"
             response="$(curl -fsS --max-time 60 \
               -H 'Content-Type: application/json' \
-              --data '{"title":"人工智能课程研究计划","requirements":"比较两种方法，完成资料整理、提纲、初稿和复核。","deliverable":"1500 字研究报告","deadline":"2026-12-15T18:00","priority":"high"}' \
+              --data "{\"title\":\"人工智能课程研究计划\",\"requirements\":\"比较两种方法，完成资料整理、提纲、初稿和复核。\",\"deliverable\":\"1500 字研究报告\",\"deadline\":\"$deadline\",\"priority\":\"high\"}" \
               https://pace-pal-eta.vercel.app/api/plan || true)"
             jq '{fallback, fallbackReason, model, subtaskCount: (.subtasks | length)}' <<<"$response" || true
-            if jq -e '
+            if ! jq -e '
               .fallback == false and
               .model == "nvidia/nemotron-3.5-lightning-free" and
               (.subtasks | length >= 4)
             ' <<<"$response" >/dev/null; then
+              sleep 10
+              continue
+            fi
+
+            refine_request="$(jq -n \
+              --arg deadline "$deadline" \
+              --argjson tasks "$(jq '.subtasks | map(. + {status: "todo", actualMinutes: 0, activeSince: null, postponedUntil: null})' <<<"$response")" \
+              '{
+                assignment: {
+                  id: "production-smoke",
+                  createdAt: "2026-11-21T00:00:00.000Z",
+                  status: "scheduled",
+                  title: "人工智能课程研究计划",
+                  requirements: "比较两种方法，完成资料整理、提纲、初稿和复核。",
+                  deliverable: "1500 字研究报告",
+                  deadline: $deadline,
+                  priority: "high",
+                  subtasks: $tasks,
+                  availability: {dailyMinutes: 60, preferredTime: "18:00"},
+                  schedule: [],
+                  unscheduledMinutes: 0,
+                  checkIn: {availableMinutes: 30, energy: "medium"},
+                  scheduleNotice: "",
+                  chatMessages: []
+                },
+                message: "把每天可用时间调整为 45 分钟，并保持任务顺序。"
+              }')"
+            refinement="$(curl -fsS --max-time 60 \
+              -H 'Content-Type: application/json' \
+              --data "$refine_request" \
+              https://pace-pal-eta.vercel.app/api/refine || true)"
+            jq '{fallback, fallbackReason, model, assistantMessage, dailyMinutes: .availability.dailyMinutes}' <<<"$refinement" || true
+            if jq -e '
+              .fallback == false and
+              .model == "nvidia/nemotron-3.5-lightning-free" and
+              .availability.dailyMinutes == 45 and
+              (.assistantMessage | length > 0)
+            ' <<<"$refinement" >/dev/null; then
               exit 0
             fi
             sleep 10

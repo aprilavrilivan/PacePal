@@ -12,6 +12,7 @@ import {
   type Assignment,
   type AssignmentInput,
   type AppState,
+  type ChatMessage,
   type Energy,
   type ScheduleBlock,
   type Subtask,
@@ -22,6 +23,10 @@ import {
   normalizeDependencies,
 } from "@/features/pacepal/mock-planner";
 import { requestPlan } from "@/features/pacepal/plan-api";
+import {
+  mergeRefinement,
+  requestRefinement,
+} from "@/features/pacepal/refinement";
 import {
   buildSchedule,
   calculateDeadlineRisk,
@@ -38,7 +43,7 @@ import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 type Screen = "dashboard" | "create" | "plan" | "availability" | "account";
-type DashboardView = "today" | "tasks" | "schedule";
+type DashboardView = "overview" | "tasks" | "assistant" | "schedule";
 type SyncStatus = "local" | "loading" | "saving" | "synced" | "error";
 type FormErrors = Partial<Record<keyof AssignmentInput, string>>;
 
@@ -51,15 +56,15 @@ const emptyForm: AssignmentInput = {
 };
 
 const fieldClassName =
-  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-950 shadow-[0_1px_2px_rgba(15,23,42,0.03)] outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
+  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-950 shadow-[0_1px_2px_rgba(15,23,42,0.03)] outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10";
 const primaryButtonClassName =
-  "inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-2.5 font-semibold text-white shadow-[0_8px_24px_rgba(15,23,42,0.16)] transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex min-h-11 items-center justify-center rounded-xl bg-[#5b55df] px-5 py-2.5 font-semibold text-white shadow-[0_10px_24px_rgba(91,85,223,0.22)] transition hover:bg-[#4943c8] focus:outline-none focus:ring-4 focus:ring-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50";
 const secondaryButtonClassName =
   "inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-blue-500/10";
 const textButtonClassName =
   "rounded-lg px-2.5 py-1.5 text-sm font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-blue-500/10";
 const surfaceClassName =
-  "rounded-2xl border border-slate-200/80 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.07)]";
+  "rounded-2xl border border-slate-200/80 bg-white shadow-[0_12px_35px_rgba(39,39,76,0.06)]";
 
 const statusLabels: Record<Subtask["status"], string> = {
   blocked: "卡住",
@@ -109,6 +114,13 @@ function tomorrowDateKey() {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   return dateKey(tomorrow);
+}
+
+function greetingText() {
+  const hour = new Date().getHours();
+  if (hour < 11) return "早上好";
+  if (hour < 18) return "下午好";
+  return "晚上好";
 }
 
 function settleActiveTime(task: Subtask, now = new Date()): Subtask {
@@ -168,7 +180,7 @@ export function PacePalApp() {
   const [screen, setScreen] = useState<Screen>("dashboard");
   const [accountReturnScreen, setAccountReturnScreen] =
     useState<Screen>("dashboard");
-  const [dashboardView, setDashboardView] = useState<DashboardView>("today");
+  const [dashboardView, setDashboardView] = useState<DashboardView>("overview");
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [form, setForm] = useState<AssignmentInput>(emptyForm);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -183,6 +195,8 @@ export function PacePalApp() {
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
   const userId = user?.id ?? null;
 
   useEffect(() => {
@@ -459,6 +473,7 @@ export function PacePalApp() {
       unscheduledMinutes: 0,
       checkIn: { availableMinutes: 30, energy: "medium" },
       scheduleNotice: "",
+      chatMessages: [],
     };
 
     setAppState({ version: 1, assignment: nextAssignment });
@@ -567,7 +582,7 @@ export function PacePalApp() {
       scheduleNotice: "计划已生成",
       unscheduledMinutes: result.unscheduledMinutes,
     }));
-    setDashboardView("today");
+    setDashboardView("overview");
     setScreen("dashboard");
   }
 
@@ -730,12 +745,73 @@ export function PacePalApp() {
     });
   }
 
+  async function sendChatMessage(content: string) {
+    const message = content.trim();
+    if (!assignment || !message || chatBusy) return;
+
+    const userMessage: ChatMessage = {
+      content: message,
+      createdAt: new Date().toISOString(),
+      id: createId("message"),
+      role: "user",
+    };
+    setChatDraft("");
+    setChatBusy(true);
+    updateAssignment((current) => ({
+      ...current,
+      chatMessages: [...current.chatMessages, userMessage],
+    }));
+
+    try {
+      const response = await requestRefinement(assignment, message);
+      const assistantMessage: ChatMessage = {
+        content: response.assistantMessage,
+        createdAt: new Date().toISOString(),
+        id: createId("message"),
+        role: "assistant",
+      };
+
+      updateAssignment((current) => {
+        const refined = response.changed
+          ? mergeRefinement(current, response)
+          : current;
+        const next = response.changed
+          ? rebuildAssignmentSchedule(refined, "AI 已更新任务和安排")
+          : refined;
+        return {
+          ...next,
+          chatMessages: [...next.chatMessages, assistantMessage],
+        };
+      });
+    } catch {
+      updateAssignment((current) => ({
+        ...current,
+        chatMessages: [
+          ...current.chatMessages,
+          {
+            content: "暂时无法连接 AI，你的计划没有变化。",
+            createdAt: new Date().toISOString(),
+            id: createId("message"),
+            role: "assistant",
+          },
+        ],
+      }));
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  function submitChat(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void sendChatMessage(chatDraft);
+  }
+
   function deleteAssignment() {
     if (!window.confirm("删除当前作业计划？")) return;
     clearAppState();
     setAppState(emptyAppState);
     setScreen("dashboard");
-    setDashboardView("today");
+    setDashboardView("overview");
   }
 
   const appFrameProps = {
@@ -1235,16 +1311,50 @@ export function PacePalApp() {
     : nextBlock?.date === currentDateKey()
       ? `今天还有 ${nextBlock.durationMinutes} 分钟计划`
       : "";
+  const remainingMinutes = assignment.subtasks
+    .filter((task) => task.status !== "completed")
+    .reduce((total, task) => total + task.estimatedMinutes, 0);
+  const todayBlocks = assignment.schedule.filter(
+    (block) => block.date === currentDateKey(),
+  );
+  const daysRemaining = Math.max(
+    0,
+    Math.ceil(
+      (new Date(assignment.deadline).getTime() -
+        new Date(`${currentDateKey()}T00:00:00`).getTime()) /
+        86_400_000,
+    ),
+  );
+  const viewTitles: Record<DashboardView, string> = {
+    assistant: "AI 助手",
+    overview: assignment.title,
+    schedule: "安排",
+    tasks: "任务",
+  };
 
   return (
-    <AppFrame {...appFrameProps}>
-      <div className="mx-auto w-full max-w-5xl py-8 sm:py-12">
-        <div className="flex flex-col gap-5 pb-6 sm:flex-row sm:items-end sm:justify-between">
+    <WorkspaceFrame
+      accountLabel={appFrameProps.accountLabel}
+      activeView={dashboardView}
+      onAccount={openAccount}
+      onNavigate={setDashboardView}
+      syncLabel={syncStatusText[syncStatus]}
+    >
+      <div className="mx-auto w-full max-w-[1180px] px-5 py-7 sm:px-8 lg:px-10 lg:py-10">
+        <div className="flex flex-col gap-5 pb-7 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-4xl">
-              {assignment.title}
+            {dashboardView === "overview" ? (
+              <p className="mb-2 text-sm font-semibold text-violet-600">
+                {greetingText()}
+              </p>
+            ) : null}
+            <h1 className="text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-[2.5rem]">
+              {viewTitles[dashboardView]}
             </h1>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm font-medium text-slate-500">
+              {dashboardView !== "overview" ? (
+                <span>{assignment.title}</span>
+              ) : null}
               <span>截止 {formatDate(assignment.deadline)}</span>
               <span>
                 {completedCount} / {assignment.subtasks.length} 完成
@@ -1269,44 +1379,9 @@ export function PacePalApp() {
           </div>
         </div>
 
-        <div className="h-1.5 overflow-hidden rounded-full bg-slate-200/80">
-          <div
-            aria-label={`完成进度 ${progress}%`}
-            className="h-full rounded-full bg-blue-600 transition-[width]"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-
-        <nav
-          aria-label="作业视图"
-          className="mt-8 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-[0_1px_3px_rgba(15,23,42,0.05)]"
-        >
-          {(
-            [
-              ["today", "今天"],
-              ["tasks", "任务"],
-              ["schedule", "安排"],
-            ] as const
-          ).map(([view, label]) => (
-            <button
-              aria-current={dashboardView === view ? "page" : undefined}
-              className={`rounded-lg px-4 py-2 text-sm font-semibold transition focus:ring-4 focus:ring-blue-500/10 focus:outline-none ${
-                dashboardView === view
-                  ? "bg-slate-950 text-white shadow-sm"
-                  : "text-slate-500 hover:bg-slate-50 hover:text-slate-950"
-              }`}
-              key={view}
-              onClick={() => setDashboardView(view)}
-              type="button"
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-
         {assignment.scheduleNotice ? (
           <p
-            className="mt-6 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 font-medium text-blue-900"
+            className="mb-4 rounded-xl border border-violet-100 bg-violet-50 px-4 py-3 font-medium text-violet-950"
             role="status"
           >
             {assignment.scheduleNotice}
@@ -1315,160 +1390,270 @@ export function PacePalApp() {
 
         {riskMinutes > 0 ? (
           <p
-            className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-medium text-amber-950"
+            className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-medium text-amber-950"
             role="status"
           >
             截止前缺少 {riskMinutes} 分钟容量
           </p>
         ) : null}
 
-        {dashboardView === "today" ? (
-          <section className="grid gap-5 py-8 lg:grid-cols-[0.72fr_1.28fr]">
-            <div className={`${surfaceClassName} p-5 sm:p-6`}>
-              <h2 className="text-lg font-semibold tracking-tight text-slate-950">
-                今日状态
-              </h2>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-                <FormField label="可用时间">
-                  <select
-                    className={fieldClassName}
-                    id="check-in-time"
-                    onChange={(event) =>
-                      updateCheckIn({
-                        availableMinutes: Number(event.target.value),
-                      })
-                    }
-                    value={assignment.checkIn.availableMinutes}
-                  >
-                    <option value={15}>15 分钟</option>
-                    <option value={30}>30 分钟</option>
-                    <option value={60}>60 分钟</option>
-                    <option value={90}>90 分钟</option>
-                  </select>
-                </FormField>
-                <FormField label="精力">
-                  <select
-                    className={fieldClassName}
-                    id="check-in-energy"
-                    onChange={(event) =>
-                      updateCheckIn({ energy: event.target.value as Energy })
-                    }
-                    value={assignment.checkIn.energy}
-                  >
-                    <option value="low">较低</option>
-                    <option value="medium">正常</option>
-                    <option value="high">充足</option>
-                  </select>
-                </FormField>
-              </div>
-              {reminder ? (
-                <p className="mt-5 border-t border-slate-100 pt-4 font-medium text-slate-600">
-                  {reminder}
+        {dashboardView === "overview" ? (
+          <section className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="rounded-2xl bg-[#5b55df] p-5 text-white shadow-[0_16px_36px_rgba(91,85,223,0.22)]">
+                <p className="text-sm font-semibold text-violet-100">
+                  完成进度
                 </p>
-              ) : null}
+                <div className="mt-3 flex items-end justify-between gap-4">
+                  <span className="text-4xl font-semibold tracking-[-0.05em]">
+                    {progress}%
+                  </span>
+                  <span className="text-sm font-medium text-violet-100">
+                    {completedCount}/{assignment.subtasks.length}
+                  </span>
+                </div>
+                <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/20">
+                  <div
+                    aria-label={`完成进度 ${progress}%`}
+                    className="h-full rounded-full bg-white transition-[width]"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </div>
+              <div className={`${surfaceClassName} p-5`}>
+                <p className="text-sm font-semibold text-slate-500">距离截止</p>
+                <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
+                  {daysRemaining} 天
+                </p>
+                <p className="mt-2 text-sm font-medium text-slate-500">
+                  {formatDate(assignment.deadline)}
+                </p>
+              </div>
+              <div className={`${surfaceClassName} p-5`}>
+                <p className="text-sm font-semibold text-slate-500">剩余工作</p>
+                <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
+                  {remainingMinutes} 分钟
+                </p>
+                <p className="mt-2 text-sm font-medium text-slate-500">
+                  {assignment.subtasks.length - completedCount} 个任务
+                </p>
+              </div>
             </div>
 
-            {recommendedTask && recommendation ? (
-              <div className={`${surfaceClassName} p-5 sm:p-7`}>
-                <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-blue-700">
-                  <span>{statusLabels[recommendedTask.status]}</span>
-                  <span aria-hidden="true" className="text-slate-300">
-                    ·
-                  </span>
-                  <span>
-                    {recommendation.isPartial
-                      ? `先做 ${recommendation.suggestedMinutes} 分钟`
-                      : `${recommendation.suggestedMinutes} 分钟`}
-                  </span>
-                </div>
-                <h2 className="mt-3 text-2xl font-semibold tracking-[-0.02em] text-slate-950">
-                  {recommendedTask.title}
-                </h2>
-                <p className="mt-3 max-w-2xl leading-7 text-slate-600">
-                  {recommendedTask.completionCriteria}
-                </p>
-                {recommendedBlock ? (
-                  <p className="mt-4 text-sm font-medium text-slate-500">
-                    {formatScheduleDate(recommendedBlock.date)} ·{" "}
-                    {recommendedBlock.startTime}
-                  </p>
-                ) : null}
-                <div className="mt-7 flex flex-wrap gap-2">
-                  {recommendedTask.status === "in_progress" ? (
-                    <button
-                      className={secondaryButtonClassName}
-                      onClick={() => pauseTask(recommendedTask.id)}
-                      type="button"
-                    >
-                      暂停
-                    </button>
-                  ) : (
-                    <button
-                      className={primaryButtonClassName}
-                      onClick={() => startTask(recommendedTask.id)}
-                      type="button"
-                    >
-                      {recommendedTask.status === "paused" ? "继续" : "开始"}
-                    </button>
-                  )}
-                  <button
-                    className={secondaryButtonClassName}
-                    onClick={() => toggleCompleted(recommendedTask.id)}
-                    type="button"
-                  >
-                    完成
-                  </button>
-                  <button
-                    className={textButtonClassName}
-                    onClick={() => postponeTask(recommendedTask.id)}
-                    type="button"
-                  >
-                    延期
-                  </button>
-                  <button
-                    className={textButtonClassName}
-                    onClick={() => blockTask(recommendedTask.id)}
-                    type="button"
-                  >
-                    卡住了
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className={`${surfaceClassName} p-6 sm:p-8`}>
-                <h2 className="text-xl font-semibold text-slate-950">
-                  {completedCount === assignment.subtasks.length
-                    ? "当前计划已完成"
-                    : "当前没有可开始的任务"}
-                </h2>
-                {assignment.subtasks.some(
-                  (task) => task.status === "blocked",
-                ) ? (
-                  <div className="mt-5 space-y-3">
-                    {assignment.subtasks
-                      .filter((task) => task.status === "blocked")
-                      .map((task) => (
+            <div className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]">
+              {recommendedTask && recommendation ? (
+                <div className={`${surfaceClassName} overflow-hidden`}>
+                  <div className="border-b border-slate-100 px-6 py-5 sm:px-7">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h2 className="text-lg font-semibold text-slate-950">
+                        下一步
+                      </h2>
+                      <div className="flex items-center gap-2 text-sm font-semibold text-violet-600">
+                        <span>{statusLabels[recommendedTask.status]}</span>
+                        <span className="text-slate-300" aria-hidden="true">
+                          ·
+                        </span>
+                        <span>
+                          {recommendation.isPartial
+                            ? `先做 ${recommendation.suggestedMinutes} 分钟`
+                            : `${recommendation.suggestedMinutes} 分钟`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="px-6 py-7 sm:px-7 sm:py-8">
+                    <h3 className="max-w-2xl text-2xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-3xl">
+                      {recommendedTask.title}
+                    </h3>
+                    <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
+                      {recommendedTask.completionCriteria}
+                    </p>
+                    {recommendedBlock ? (
+                      <p className="mt-5 text-sm font-semibold text-slate-500">
+                        {formatScheduleDate(recommendedBlock.date)} ·{" "}
+                        {recommendedBlock.startTime}
+                      </p>
+                    ) : null}
+                    <div className="mt-8 flex flex-wrap gap-2">
+                      {recommendedTask.status === "in_progress" ? (
                         <button
-                          className={`${secondaryButtonClassName} w-full justify-between`}
-                          key={task.id}
-                          onClick={() => splitBlockedTask(task.id)}
+                          className={secondaryButtonClassName}
+                          onClick={() => pauseTask(recommendedTask.id)}
                           type="button"
                         >
-                          <span className="truncate">{task.title}</span>
-                          <span>拆小一步</span>
+                          暂停
                         </button>
-                      ))}
+                      ) : (
+                        <button
+                          className={primaryButtonClassName}
+                          onClick={() => startTask(recommendedTask.id)}
+                          type="button"
+                        >
+                          {recommendedTask.status === "paused"
+                            ? "继续"
+                            : "开始"}
+                        </button>
+                      )}
+                      <button
+                        className={secondaryButtonClassName}
+                        onClick={() => toggleCompleted(recommendedTask.id)}
+                        type="button"
+                      >
+                        完成
+                      </button>
+                      <button
+                        className={textButtonClassName}
+                        onClick={() => postponeTask(recommendedTask.id)}
+                        type="button"
+                      >
+                        延期
+                      </button>
+                      <button
+                        className={textButtonClassName}
+                        onClick={() => blockTask(recommendedTask.id)}
+                        type="button"
+                      >
+                        卡住了
+                      </button>
+                    </div>
                   </div>
+                </div>
+              ) : (
+                <div className={`${surfaceClassName} p-7`}>
+                  <h2 className="text-xl font-semibold text-slate-950">
+                    {completedCount === assignment.subtasks.length
+                      ? "当前计划已完成"
+                      : "当前没有可开始的任务"}
+                  </h2>
+                  {assignment.subtasks
+                    .filter((task) => task.status === "blocked")
+                    .map((task) => (
+                      <button
+                        className={`${secondaryButtonClassName} mt-5`}
+                        key={task.id}
+                        onClick={() => splitBlockedTask(task.id)}
+                        type="button"
+                      >
+                        拆小一步
+                      </button>
+                    ))}
+                </div>
+              )}
+
+              <div className={`${surfaceClassName} p-5 sm:p-6`}>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  此刻状态
+                </h2>
+                <div className="mt-5 space-y-4">
+                  <FormField label="可用时间">
+                    <select
+                      className={fieldClassName}
+                      id="check-in-time"
+                      onChange={(event) =>
+                        updateCheckIn({
+                          availableMinutes: Number(event.target.value),
+                        })
+                      }
+                      value={assignment.checkIn.availableMinutes}
+                    >
+                      <option value={15}>15 分钟</option>
+                      <option value={30}>30 分钟</option>
+                      <option value={60}>60 分钟</option>
+                      <option value={90}>90 分钟</option>
+                    </select>
+                  </FormField>
+                  <FormField label="精力">
+                    <select
+                      className={fieldClassName}
+                      id="check-in-energy"
+                      onChange={(event) =>
+                        updateCheckIn({ energy: event.target.value as Energy })
+                      }
+                      value={assignment.checkIn.energy}
+                    >
+                      <option value="low">较低</option>
+                      <option value="medium">正常</option>
+                      <option value="high">充足</option>
+                    </select>
+                  </FormField>
+                </div>
+                {reminder ? (
+                  <p className="mt-5 border-t border-slate-100 pt-4 font-medium text-slate-600">
+                    {reminder}
+                  </p>
                 ) : null}
               </div>
-            )}
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className={`${surfaceClassName} p-5 sm:p-6`}>
+                <div className="flex items-center justify-between gap-4">
+                  <h2 className="text-lg font-semibold text-slate-950">
+                    今日安排
+                  </h2>
+                  <button
+                    className={textButtonClassName}
+                    onClick={() => setDashboardView("schedule")}
+                    type="button"
+                  >
+                    查看全部
+                  </button>
+                </div>
+                <ul className="mt-4 divide-y divide-slate-100">
+                  {(todayBlocks.length > 0
+                    ? todayBlocks
+                    : assignment.schedule.slice(0, 3)
+                  ).map((block) => (
+                    <li
+                      className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-3 py-3.5"
+                      key={block.id}
+                    >
+                      <span className="text-sm font-semibold text-slate-500">
+                        {block.startTime}
+                      </span>
+                      <span className="truncate font-semibold text-slate-800">
+                        {taskById.get(block.subtaskId)?.title ?? "任务"}
+                      </span>
+                      <span className="text-sm font-medium text-slate-400">
+                        {block.durationMinutes} 分钟
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {assignment.schedule.length === 0 ? (
+                  <p className="mt-4 text-slate-500">当前没有待安排任务。</p>
+                ) : null}
+              </div>
+
+              <div className="rounded-2xl bg-slate-950 p-6 text-white shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
+                <div className="flex size-11 items-center justify-center rounded-xl bg-violet-500 text-lg font-bold">
+                  AI
+                </div>
+                <h2 className="mt-6 text-xl font-semibold tracking-[-0.02em]">
+                  和 PacePal 调整计划
+                </h2>
+                <p className="mt-3 leading-7 text-slate-300">
+                  {assignment.chatMessages.at(-1)?.content ??
+                    "拆分任务、调整时间或重新安排优先顺序。"}
+                </p>
+                <button
+                  className="mt-7 inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-2.5 font-semibold text-slate-950 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-400/30 focus:outline-none"
+                  onClick={() => setDashboardView("assistant")}
+                  type="button"
+                >
+                  打开 AI 助手
+                </button>
+              </div>
+            </div>
           </section>
         ) : null}
 
         {dashboardView === "tasks" ? (
-          <section className="py-8">
+          <section>
             <div className="flex items-center justify-between gap-4">
-              <h2 className="text-xl font-semibold text-slate-950">任务</h2>
+              <p className="font-medium text-slate-500">
+                {remainingMinutes} 分钟待完成
+              </p>
               <button
                 className={secondaryButtonClassName}
                 onClick={() => setScreen("plan")}
@@ -1488,7 +1673,7 @@ export function PacePalApp() {
                   <input
                     aria-label={`完成 ${subtask.title}`}
                     checked={subtask.status === "completed"}
-                    className="mt-0.5 size-5 rounded border-slate-300 accent-blue-600"
+                    className="mt-0.5 size-5 rounded border-slate-300 accent-violet-600"
                     onChange={() => toggleCompleted(subtask.id)}
                     type="checkbox"
                   />
@@ -1523,11 +1708,144 @@ export function PacePalApp() {
           </section>
         ) : null}
 
+        {dashboardView === "assistant" ? (
+          <section className="grid gap-5 lg:grid-cols-[18rem_1fr]">
+            <aside className="space-y-5">
+              <div className={`${surfaceClassName} p-5`}>
+                <h2 className="font-semibold text-slate-950">当前计划</h2>
+                <dl className="mt-5 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <dt className="text-sm font-medium text-slate-500">进度</dt>
+                    <dd className="font-semibold text-slate-950">
+                      {progress}%
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <dt className="text-sm font-medium text-slate-500">剩余</dt>
+                    <dd className="font-semibold text-slate-950">
+                      {remainingMinutes} 分钟
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <dt className="text-sm font-medium text-slate-500">每天</dt>
+                    <dd className="font-semibold text-slate-950">
+                      {assignment.availability.dailyMinutes} 分钟
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+              {recommendedTask ? (
+                <div className={`${surfaceClassName} p-5`}>
+                  <p className="text-sm font-semibold text-violet-600">
+                    当前下一步
+                  </p>
+                  <h2 className="mt-3 font-semibold text-slate-950">
+                    {recommendedTask.title}
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">
+                    {recommendedTask.estimatedMinutes} 分钟
+                  </p>
+                </div>
+              ) : null}
+            </aside>
+
+            <div
+              className={`${surfaceClassName} flex min-h-[620px] flex-col overflow-hidden`}
+            >
+              <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-10 items-center justify-center rounded-xl bg-violet-100 font-bold text-violet-700">
+                    AI
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-slate-950">PacePal</h2>
+                    <p className="text-sm font-medium text-emerald-600">
+                      可以直接修改计划
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                aria-live="polite"
+                className="flex-1 space-y-4 overflow-y-auto bg-slate-50/60 px-5 py-6 sm:px-7"
+              >
+                {assignment.chatMessages.length === 0 ? (
+                  <div className="max-w-[80%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 leading-7 text-slate-700 shadow-sm">
+                    告诉我哪里需要调整，我会更新任务和后续安排。
+                  </div>
+                ) : null}
+                {assignment.chatMessages.map((message) => (
+                  <div
+                    className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                    key={message.id}
+                  >
+                    <p
+                      className={`max-w-[82%] rounded-2xl px-4 py-3 leading-7 shadow-sm ${
+                        message.role === "user"
+                          ? "rounded-tr-md bg-[#5b55df] text-white"
+                          : "rounded-tl-md border border-slate-200 bg-white text-slate-700"
+                      }`}
+                    >
+                      {message.content}
+                    </p>
+                  </div>
+                ))}
+                {chatBusy ? (
+                  <div className="max-w-[80%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 font-medium text-slate-500 shadow-sm">
+                    正在调整计划…
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="border-t border-slate-100 bg-white p-4 sm:p-5">
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {[
+                    "把当前任务拆小",
+                    "我每天只有 30 分钟",
+                    "重新平衡后续任务",
+                  ].map((prompt) => (
+                    <button
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus:ring-4 focus:ring-violet-500/10 focus:outline-none disabled:opacity-50"
+                      disabled={chatBusy}
+                      key={prompt}
+                      onClick={() => void sendChatMessage(prompt)}
+                      type="button"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+                <form className="flex items-end gap-3" onSubmit={submitChat}>
+                  <label className="sr-only" htmlFor="chat-message">
+                    给 AI 助手的消息
+                  </label>
+                  <textarea
+                    className="min-h-12 flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-950 transition outline-none focus:border-violet-500 focus:bg-white focus:ring-4 focus:ring-violet-500/10"
+                    disabled={chatBusy}
+                    id="chat-message"
+                    onChange={(event) => setChatDraft(event.target.value)}
+                    placeholder="输入你想调整的内容"
+                    rows={1}
+                    value={chatDraft}
+                  />
+                  <button
+                    className={primaryButtonClassName}
+                    disabled={chatBusy || !chatDraft.trim()}
+                    type="submit"
+                  >
+                    发送
+                  </button>
+                </form>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
         {dashboardView === "schedule" ? (
-          <section className="py-8">
-            <h2 className="text-xl font-semibold text-slate-950">安排</h2>
+          <section>
             {groupedSchedule.length > 0 ? (
-              <div className="mt-5 space-y-7">
+              <div className="space-y-7">
                 {groupedSchedule.map(([date, blocks]) => (
                   <div key={date}>
                     <h3 className="mb-3 font-semibold text-slate-950">
@@ -1590,7 +1908,200 @@ export function PacePalApp() {
           </section>
         ) : null}
       </div>
-    </AppFrame>
+    </WorkspaceFrame>
+  );
+}
+
+function WorkspaceFrame({
+  accountLabel,
+  activeView,
+  children,
+  onAccount,
+  onNavigate,
+  syncLabel,
+}: {
+  accountLabel: string;
+  activeView: DashboardView;
+  children: React.ReactNode;
+  onAccount: () => void;
+  onNavigate: (view: DashboardView) => void;
+  syncLabel: string;
+}) {
+  const navigation: Array<{ label: string; view: DashboardView }> = [
+    { label: "概览", view: "overview" },
+    { label: "任务", view: "tasks" },
+    { label: "AI 助手", view: "assistant" },
+    { label: "安排", view: "schedule" },
+  ];
+
+  return (
+    <div className="min-h-dvh bg-[#f6f7fb]">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-slate-200/80 bg-white px-4 py-6 lg:flex">
+        <div className="flex items-center gap-3 px-2">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-[#5b55df] text-lg font-bold text-white shadow-[0_8px_18px_rgba(91,85,223,0.25)]">
+            P
+          </span>
+          <span className="text-xl font-semibold tracking-[-0.03em] text-slate-950">
+            PacePal
+          </span>
+        </div>
+
+        <nav aria-label="主要导航" className="mt-10 space-y-1">
+          {navigation.map((item) => {
+            const active = item.view === activeView;
+            return (
+              <button
+                aria-current={active ? "page" : undefined}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left font-semibold transition focus:ring-4 focus:ring-violet-500/10 focus:outline-none ${
+                  active
+                    ? "bg-violet-50 text-violet-700"
+                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-950"
+                }`}
+                key={item.view}
+                onClick={() => onNavigate(item.view)}
+                type="button"
+              >
+                <WorkspaceIcon view={item.view} />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="mt-auto space-y-2">
+          <p className="px-3 text-xs font-semibold text-slate-400">
+            {syncLabel}
+          </p>
+          <button
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
+            onClick={onAccount}
+            type="button"
+          >
+            <span className="flex size-8 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-600">
+              {accountLabel.slice(0, 1).toUpperCase()}
+            </span>
+            <span className="min-w-0 truncate">{accountLabel}</span>
+          </button>
+        </div>
+      </aside>
+
+      <div className="lg:pl-60">
+        <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl lg:hidden">
+          <div className="flex h-16 items-center justify-between px-5">
+            <div className="flex items-center gap-2.5">
+              <span className="flex size-8 items-center justify-center rounded-lg bg-[#5b55df] font-bold text-white">
+                P
+              </span>
+              <span className="text-lg font-semibold tracking-[-0.03em] text-slate-950">
+                PacePal
+              </span>
+            </div>
+            <button
+              className={textButtonClassName}
+              onClick={onAccount}
+              type="button"
+            >
+              {accountLabel}
+            </button>
+          </div>
+          <nav
+            aria-label="主要导航"
+            className="flex gap-1 overflow-x-auto px-4 pb-3"
+          >
+            {navigation.map((item) => {
+              const active = item.view === activeView;
+              return (
+                <button
+                  aria-current={active ? "page" : undefined}
+                  className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition focus:ring-4 focus:ring-violet-500/10 focus:outline-none ${
+                    active ? "bg-violet-50 text-violet-700" : "text-slate-500"
+                  }`}
+                  key={item.view}
+                  onClick={() => onNavigate(item.view)}
+                  type="button"
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+        </header>
+        <main>{children}</main>
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceIcon({ view }: { view: DashboardView }) {
+  if (view === "overview") {
+    return (
+      <svg
+        aria-hidden="true"
+        className="size-5"
+        fill="none"
+        viewBox="0 0 24 24"
+      >
+        <path
+          d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"
+          stroke="currentColor"
+          strokeLinejoin="round"
+          strokeWidth="1.8"
+        />
+      </svg>
+    );
+  }
+  if (view === "tasks") {
+    return (
+      <svg
+        aria-hidden="true"
+        className="size-5"
+        fill="none"
+        viewBox="0 0 24 24"
+      >
+        <path
+          d="m4 7 2 2 3-4M12 7h8M4 15l2 2 3-4M12 15h8"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.8"
+        />
+      </svg>
+    );
+  }
+  if (view === "assistant") {
+    return (
+      <svg
+        aria-hidden="true"
+        className="size-5"
+        fill="none"
+        viewBox="0 0 24 24"
+      >
+        <path
+          d="M5 18.5 3.5 21v-5A8 8 0 1 1 7 19h-2Z"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.8"
+        />
+        <path
+          d="M8 11h.01M12 11h.01M16 11h.01"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="2.2"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg aria-hidden="true" className="size-5" fill="none" viewBox="0 0 24 24">
+      <path
+        d="M6 3v3M18 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
   );
 }
 
