@@ -8,7 +8,11 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await page.reload();
 
   await expect(
-    page.getByRole("heading", { name: "开始你的作业计划" }),
+    page.getByRole("heading", { name: "开始新的作业计划" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "AI 助手" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "创建第一份作业" }),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "创建作业" }).click();

@@ -1264,24 +1264,109 @@ export function PacePalApp() {
 
   if (!assignment) {
     return (
-      <AppFrame {...appFrameProps}>
-        <div className="grid min-h-[calc(100dvh-76px)] place-items-center px-2 py-16 text-center">
-          <div
-            className={`${surfaceClassName} w-full max-w-xl px-6 py-16 sm:px-12`}
-          >
-            <h1 className="text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-4xl">
-              开始你的作业计划
+      <WorkspaceFrame
+        accountLabel={appFrameProps.accountLabel}
+        activeView="overview"
+        onAccount={openAccount}
+        onNavigate={openCreate}
+        syncLabel={syncStatusText[syncStatus]}
+      >
+        <div className="mx-auto w-full max-w-[1180px] px-5 py-7 sm:px-8 lg:px-10 lg:py-10">
+          <div className="pb-7">
+            <p className="mb-2 text-sm font-semibold text-violet-600">
+              {greetingText()}
+            </p>
+            <h1 className="text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-[2.5rem]">
+              开始新的作业计划
             </h1>
-            <button
-              className={`${primaryButtonClassName} mt-8`}
-              onClick={openCreate}
-              type="button"
-            >
-              创建作业
-            </button>
           </div>
+
+          <section className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="rounded-2xl bg-[#5b55df] p-5 text-white shadow-[0_16px_36px_rgba(91,85,223,0.22)]">
+                <p className="text-sm font-semibold text-violet-100">进行中</p>
+                <p className="mt-3 text-4xl font-semibold tracking-[-0.05em]">
+                  0
+                </p>
+              </div>
+              <div className={`${surfaceClassName} p-5`}>
+                <p className="text-sm font-semibold text-slate-500">今日安排</p>
+                <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
+                  0
+                </p>
+              </div>
+              <div className={`${surfaceClassName} p-5`}>
+                <p className="text-sm font-semibold text-slate-500">已完成</p>
+                <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
+                  0
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]">
+              <div
+                className={`${surfaceClassName} flex min-h-80 flex-col justify-between overflow-hidden p-6 sm:p-8`}
+              >
+                <div className="flex size-12 items-center justify-center rounded-2xl bg-violet-100 text-violet-700">
+                  <svg
+                    aria-hidden="true"
+                    className="size-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M12 5v14M5 12h14"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeWidth="2"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-2xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-3xl">
+                    创建第一份作业
+                  </h2>
+                  <div className="mt-6 flex flex-wrap gap-2">
+                    {["任务拆解", "每日安排", "动态调整"].map((label) => (
+                      <span
+                        className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-600"
+                        key={label}
+                      >
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                  <button
+                    className={`${primaryButtonClassName} mt-8`}
+                    onClick={openCreate}
+                    type="button"
+                  >
+                    创建作业
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex min-h-80 flex-col justify-between rounded-2xl bg-slate-950 p-6 text-white shadow-[0_18px_45px_rgba(15,23,42,0.16)] sm:p-8">
+                <div className="flex size-11 items-center justify-center rounded-xl bg-violet-500 text-lg font-bold">
+                  AI
+                </div>
+                <div>
+                  <h2 className="text-2xl font-semibold tracking-[-0.03em]">
+                    AI 任务规划
+                  </h2>
+                  <button
+                    className="mt-7 inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-2.5 font-semibold text-slate-950 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-400/30 focus:outline-none"
+                    onClick={openCreate}
+                    type="button"
+                  >
+                    开始规划
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
-      </AppFrame>
+      </WorkspaceFrame>
     );
   }
 
