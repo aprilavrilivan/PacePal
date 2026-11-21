@@ -7,8 +7,8 @@ import {
   Output,
   wrapLanguageModel,
 } from "ai";
-import { z } from "zod";
 
+import { normalizeGatewayPlan } from "@/features/pacepal/gateway-plan-normalizer";
 import {
   assignmentInputSchema,
   type AssignmentInput,
@@ -31,81 +31,6 @@ const gatewayLanguageModel = wrapLanguageModel({
   }),
   model: gateway(gatewayModel),
 });
-
-const modelTaskSchema = z.object({
-  completionCriteria: z.string().optional(),
-  description: z.string(),
-  difficulty: z.enum(["low", "medium", "high"]).optional(),
-  estimated_time: z.union([z.number(), z.string()]).optional(),
-  estimatedMinutes: z.number().optional(),
-  task_name: z.string().optional(),
-  title: z.string().optional(),
-});
-
-const modelPlanSchema = z.object({
-  tasks: z.array(modelTaskSchema),
-});
-
-const validatedPlanSchema = z.object({
-  tasks: z
-    .array(
-      z.object({
-        completionCriteria: z.string().trim().min(1).max(160),
-        description: z.string().trim().min(1).max(240),
-        difficulty: z.enum(["low", "medium", "high"]),
-        estimatedMinutes: z.number().int().min(5).max(240),
-        title: z.string().trim().min(1).max(80),
-      }),
-    )
-    .min(4)
-    .max(12),
-});
-
-function trimToLength(value: string, maxLength: number) {
-  return value.trim().slice(0, maxLength).trim();
-}
-
-function readEstimatedMinutes(task: z.infer<typeof modelTaskSchema>) {
-  if (typeof task.estimatedMinutes === "number") {
-    return task.estimatedMinutes;
-  }
-
-  if (typeof task.estimated_time === "number") {
-    return task.estimated_time;
-  }
-
-  const firstNumber = task.estimated_time?.match(/\d+(?:\.\d+)?/)?.[0];
-  return firstNumber ? Number(firstNumber) : 30;
-}
-
-function normalizePlan(plan: z.infer<typeof modelPlanSchema>) {
-  return validatedPlanSchema.parse({
-    tasks: plan.tasks.slice(0, 12).map((task) => {
-      const description = trimToLength(task.description, 240);
-      const estimatedMinutes = Math.min(
-        240,
-        Math.max(5, Math.round(readEstimatedMinutes(task))),
-      );
-
-      return {
-        completionCriteria: trimToLength(
-          task.completionCriteria ?? description,
-          160,
-        ),
-        description,
-        difficulty:
-          task.difficulty ??
-          (estimatedMinutes <= 30
-            ? "low"
-            : estimatedMinutes <= 60
-              ? "medium"
-              : "high"),
-        estimatedMinutes,
-        title: trimToLength(task.title ?? task.task_name ?? "", 80),
-      };
-    }),
-  });
-}
 
 function buildPrompt(assignment: AssignmentInput) {
   return [
@@ -135,10 +60,10 @@ export async function generateGatewayPlan(
     abortSignal: AbortSignal.timeout(50_000),
     maxOutputTokens: 4096,
     model: gatewayLanguageModel,
-    output: Output.object({
-      description: "A sequential assignment plan containing 4 to 12 tasks.",
+    output: Output.json({
+      description:
+        "A JSON object containing a sequential assignment plan with 4 to 8 tasks.",
       name: "assignment_plan",
-      schema: modelPlanSchema,
     }),
     prompt: buildPrompt(assignment),
     reasoning: "none",
@@ -146,5 +71,5 @@ export async function generateGatewayPlan(
       "You are PacePal, a concise academic planning assistant. Keep student control and academic integrity central.",
   });
 
-  return buildSubtasks(assignment, normalizePlan(output).tasks);
+  return buildSubtasks(assignment, normalizeGatewayPlan(output).tasks);
 }

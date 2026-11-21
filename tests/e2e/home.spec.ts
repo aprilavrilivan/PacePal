@@ -59,6 +59,7 @@ test("reports a healthy mock foundation", async ({ request }) => {
   await expect(response.json()).resolves.toEqual({
     aiProvider: "mock",
     app: "PacePal",
+    commitSha: null,
     status: "ok",
   });
 });
