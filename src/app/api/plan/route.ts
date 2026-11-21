@@ -4,10 +4,7 @@ import {
   gatewayModel,
   generateGatewayPlan,
 } from "@/features/pacepal/gateway-planner";
-import {
-  classifyGatewayFailure,
-  describeGatewayFailure,
-} from "@/features/pacepal/gateway-error";
+import { classifyGatewayFailure } from "@/features/pacepal/gateway-error";
 import { assignmentInputSchema } from "@/features/pacepal/model";
 import { generateMockPlan } from "@/features/pacepal/mock-planner";
 import { serverEnvironment } from "@/lib/env/server";
@@ -36,9 +33,6 @@ export async function POST(request: Request) {
     } catch (error) {
       console.error("AI Gateway plan generation failed", error);
       return Response.json({
-        ...(request.headers.get("x-pacepal-diagnostic") === "production-smoke"
-          ? { diagnostic: describeGatewayFailure(error) }
-          : {}),
         fallback: true,
         fallbackReason: classifyGatewayFailure(error),
         model: gatewayModel,

@@ -47,10 +47,9 @@ jobs:
         run: |
           response="$(curl -fsS --max-time 60 \
             -H 'Content-Type: application/json' \
-            -H 'X-PacePal-Diagnostic: production-smoke' \
             --data '{"title":"人工智能课程研究计划","requirements":"比较两种方法，完成资料整理、提纲、初稿和复核。","deliverable":"1500 字研究报告","deadline":"2026-12-15T18:00","priority":"high"}' \
             https://pace-pal-eta.vercel.app/api/plan)"
-          jq '{diagnostic, fallback, fallbackReason, model, subtaskCount: (.subtasks | length)}' <<<"$response"
+          jq '{fallback, fallbackReason, model, subtaskCount: (.subtasks | length)}' <<<"$response"
           jq -e '
             .fallback == false and
             .model == "nvidia/nemotron-3.5-lightning-free" and
