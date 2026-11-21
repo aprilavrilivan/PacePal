@@ -9,11 +9,9 @@ import {
 } from "ai";
 
 import { gatewayModel } from "@/features/pacepal/gateway-planner";
+import { normalizeGatewayRefinement } from "@/features/pacepal/gateway-refinement-normalizer";
 import type { Assignment } from "@/features/pacepal/model";
-import {
-  refinementOutputSchema,
-  type RefinementOutput,
-} from "@/features/pacepal/refinement";
+import type { RefinementOutput } from "@/features/pacepal/refinement";
 
 const refinementModel = wrapLanguageModel({
   middleware: extractJsonMiddleware({
@@ -61,11 +59,10 @@ export async function generateGatewayRefinement(
     abortSignal: AbortSignal.timeout(50_000),
     maxOutputTokens: 5000,
     model: refinementModel,
-    output: Output.object({
+    output: Output.json({
       description:
         "The complete revised assignment task list, availability, and a concise response to the student.",
       name: "plan_refinement",
-      schema: refinementOutputSchema,
     }),
     prompt: [
       "Collaboratively refine the student's existing assignment plan.",
@@ -85,5 +82,5 @@ export async function generateGatewayRefinement(
       "You are PacePal, a concise academic planning partner. Help the student improve tasks and schedules while preserving student control.",
   });
 
-  return refinementOutputSchema.parse(output);
+  return normalizeGatewayRefinement(output, assignment);
 }
