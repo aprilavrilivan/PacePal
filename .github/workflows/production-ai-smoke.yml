@@ -9,9 +9,14 @@ on:
       - package-lock.json
       - package.json
       - src/app/api/plan/route.ts
+      - src/app/globals.css
+      - src/components/pacepal-app.tsx
+      - src/features/pacepal/execution.ts
       - src/features/pacepal/gateway-error.ts
       - src/features/pacepal/gateway-planner.ts
+      - src/features/pacepal/model.ts
       - src/features/pacepal/plan-api.ts
+      - src/features/pacepal/scheduler.ts
 
 permissions:
   contents: read

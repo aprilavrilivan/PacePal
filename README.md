@@ -10,9 +10,9 @@ The companion pet is a gentle interaction layer across that loop. PacePal is a p
 
 ## Project status
 
-**Stage 6 complete: live AI task planning**
+**Stage 8 complete: intelligent execution and dynamic planning**
 
-The deployed app supports assignment creation, AI-powered task decomposition, validated editable plans, deterministic fallback planning and scheduling, progress updates, passwordless email sign-in, and user-isolated cloud persistence.
+The deployed app supports assignment creation, AI-powered task decomposition, validated editable plans, time-and-energy check-ins, context-aware next-step recommendations, execution tracking, deadline-risk warnings, dynamic rescheduling, passwordless email sign-in, and user-isolated cloud persistence.
 
 Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 
@@ -21,9 +21,10 @@ Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 1. Create one active assignment.
 2. Review and edit the generated task breakdown.
 3. Set daily study time and approve the schedule.
-4. View the next action, task list, and daily plan.
-5. Complete tasks without losing progress after a refresh.
-6. Sign in to migrate the local plan and use it on another device.
+4. Report the time and energy available right now.
+5. Start, pause, complete, postpone, or unblock the recommended task.
+6. Lock important time blocks or move them while the remaining plan adjusts.
+7. Sign in to keep progress across devices.
 
 ## Technology
 

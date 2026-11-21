@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   clearAppStateOwner,
+  loadAppState,
   loadAppStateOwner,
+  pacePalStorageKey,
   pacePalStorageOwnerKey,
   saveAppStateOwner,
 } from "@/features/pacepal/storage";
@@ -18,5 +20,61 @@ describe("local state ownership", () => {
 
     clearAppStateOwner();
     expect(loadAppStateOwner()).toBeNull();
+  });
+
+  it("adds execution defaults when loading a plan from an earlier stage", () => {
+    window.localStorage.setItem(
+      pacePalStorageKey,
+      JSON.stringify({
+        version: 1,
+        assignment: {
+          id: "assignment-1",
+          title: "Research report",
+          requirements: "Compare two methods",
+          deliverable: "Report",
+          deadline: "2026-12-15T18:00",
+          priority: "high",
+          createdAt: "2026-11-20T10:00:00.000Z",
+          status: "scheduled",
+          subtasks: [
+            {
+              id: "task-1",
+              title: "Read sources",
+              description: "Review the selected papers",
+              estimatedMinutes: 30,
+              completionCriteria: "Notes are complete",
+              difficulty: "medium",
+              dependencies: [],
+              status: "todo",
+            },
+          ],
+          availability: { dailyMinutes: 60, preferredTime: "18:00" },
+          schedule: [
+            {
+              id: "block-1",
+              subtaskId: "task-1",
+              date: "2026-11-21",
+              startTime: "18:00",
+              durationMinutes: 30,
+            },
+          ],
+          unscheduledMinutes: 0,
+        },
+      }),
+    );
+
+    const state = loadAppState();
+
+    expect(state.assignment?.checkIn).toEqual({
+      availableMinutes: 30,
+      energy: "medium",
+    });
+    expect(state.assignment?.scheduleNotice).toBe("");
+    expect(state.assignment?.subtasks[0]).toMatchObject({
+      actualMinutes: 0,
+      activeSince: null,
+      postponedUntil: null,
+    });
+    expect(state.assignment?.schedule[0].locked).toBe(false);
   });
 });

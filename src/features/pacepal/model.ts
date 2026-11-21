@@ -1,7 +1,15 @@
 import { z } from "zod";
 
 export const prioritySchema = z.enum(["low", "medium", "high"]);
-export const subtaskStatusSchema = z.enum(["todo", "completed"]);
+export const energySchema = z.enum(["low", "medium", "high"]);
+export const subtaskStatusSchema = z.enum([
+  "todo",
+  "in_progress",
+  "paused",
+  "postponed",
+  "blocked",
+  "completed",
+]);
 
 export const assignmentInputSchema = z.object({
   title: z.string().trim().min(1),
@@ -20,6 +28,9 @@ export const subtaskSchema = z.object({
   difficulty: z.enum(["low", "medium", "high"]),
   dependencies: z.array(z.string()),
   status: subtaskStatusSchema,
+  actualMinutes: z.number().int().min(0).default(0),
+  activeSince: z.string().nullable().default(null),
+  postponedUntil: z.string().nullable().default(null),
 });
 
 export const availabilitySchema = z.object({
@@ -33,6 +44,12 @@ export const scheduleBlockSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   startTime: z.string().regex(/^\d{2}:\d{2}$/),
   durationMinutes: z.number().int().positive(),
+  locked: z.boolean().default(false),
+});
+
+export const checkInSchema = z.object({
+  availableMinutes: z.number().int().min(5).max(240),
+  energy: energySchema,
 });
 
 export const assignmentSchema = assignmentInputSchema.extend({
@@ -43,6 +60,8 @@ export const assignmentSchema = assignmentInputSchema.extend({
   availability: availabilitySchema,
   schedule: z.array(scheduleBlockSchema),
   unscheduledMinutes: z.number().int().min(0),
+  checkIn: checkInSchema.default({ availableMinutes: 30, energy: "medium" }),
+  scheduleNotice: z.string().default(""),
 });
 
 export const appStateSchema = z.object({
@@ -54,6 +73,8 @@ export type AssignmentInput = z.infer<typeof assignmentInputSchema>;
 export type Subtask = z.infer<typeof subtaskSchema>;
 export type Availability = z.infer<typeof availabilitySchema>;
 export type ScheduleBlock = z.infer<typeof scheduleBlockSchema>;
+export type CheckIn = z.infer<typeof checkInSchema>;
+export type Energy = z.infer<typeof energySchema>;
 export type Assignment = z.infer<typeof assignmentSchema>;
 export type AppState = z.infer<typeof appStateSchema>;
 

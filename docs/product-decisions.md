@@ -87,3 +87,21 @@ These decisions convert the product brief into an implementation boundary. Chang
 **Reason:** It is a capable reasoning model with an explicitly free Vercel endpoint, a one-million-token context window, fast generation, and structured output support. This keeps the core planning flow usable without paid model usage.
 
 **Boundary:** The free endpoint is a trial service, and NVIDIA may retain prompts and responses for product improvement. Users must not enter personal, confidential, or sensitive information. Model availability, rate-limit, or output failures fall back to the deterministic plan without erasing user input. No model credential is exposed to the browser.
+
+## PD-014 — Deterministic execution recommendations
+
+**Decision:** The next task is selected from dependency-ready work using the user's current time and energy. Active and paused work is favored, tasks that fit the available window and energy are preferred, and an oversized task may be recommended as a partial work session.
+
+**Reason:** Execution guidance must react immediately, remain predictable, and continue working when the AI service is unavailable.
+
+## PD-015 — Rescheduling preserves explicit commitments
+
+**Decision:** Completing, postponing, blocking, or moving work rebuilds the remaining schedule. Locked blocks are retained, completed tasks are removed, blocked dependency chains remain unscheduled, and any deadline-capacity shortfall is shown directly.
+
+**Reason:** Dynamic plans are only useful when they adapt without silently moving commitments the user chose to protect.
+
+## PD-016 — Restrained premium visual system
+
+**Decision:** The interface uses cool neutral surfaces, precise spacing, restrained blue state accents, high-contrast primary actions, and subtle depth. Decorative illustration, gradients used as content, redundant subtitles, and explanatory microcopy remain excluded.
+
+**Reason:** A refined visual hierarchy can increase trust and clarity without adding cognitive load or departing from the minimal product boundary.

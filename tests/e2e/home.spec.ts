@@ -44,7 +44,20 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(
     page.getByRole("heading", { name: "媒介研究课程论文" }),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "下一步" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今日状态" })).toBeVisible();
+
+  await page.getByLabel("可用时间").selectOption("30");
+  await page.getByRole("button", { exact: true, name: "开始" }).click();
+  await expect(page.getByText("进行中", { exact: true })).toBeVisible();
+  await page.getByRole("button", { exact: true, name: "暂停" }).click();
+  await expect(page.getByText("已暂停", { exact: true })).toBeVisible();
+  await page.getByRole("button", { exact: true, name: "继续" }).click();
+  await page.getByRole("button", { exact: true, name: "延期" }).click();
+  await expect(page.getByText("任务已延至明天，后续安排已重排")).toBeVisible();
+
+  await page.getByRole("button", { name: "安排" }).click();
+  await page.getByRole("button", { exact: true, name: "锁定" }).first().click();
+  await expect(page.getByText("已锁定", { exact: true }).first()).toBeVisible();
 
   await page.reload();
   await expect(

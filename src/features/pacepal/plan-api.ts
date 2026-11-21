@@ -34,7 +34,16 @@ export async function requestPlan(
 
 export function buildSubtasks(
   assignment: AssignmentInput,
-  generated: Array<Omit<Subtask, "dependencies" | "id" | "status">>,
+  generated: Array<
+    Pick<
+      Subtask,
+      | "completionCriteria"
+      | "description"
+      | "difficulty"
+      | "estimatedMinutes"
+      | "title"
+    >
+  >,
 ): Subtask[] {
   const prefix = assignment.title
     .toLowerCase()
@@ -50,6 +59,9 @@ export function buildSubtasks(
         index === 0 ? [] : [`${prefix || "assignment"}-task-${index}`],
       id,
       status: "todo",
+      actualMinutes: 0,
+      activeSince: null,
+      postponedUntil: null,
     };
   });
 }

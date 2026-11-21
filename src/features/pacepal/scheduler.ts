@@ -9,6 +9,12 @@ export type ScheduleResult = {
   unscheduledMinutes: number;
 };
 
+export type DeadlineRisk = {
+  capacityMinutes: number;
+  remainingMinutes: number;
+  shortfallMinutes: number;
+};
+
 function toDateKey(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -21,6 +27,10 @@ function addDays(date: Date, days: number) {
   result.setHours(0, 0, 0, 0);
   result.setDate(result.getDate() + days);
   return result;
+}
+
+function fromDateKey(value: string) {
+  return new Date(`${value}T00:00:00`);
 }
 
 function addMinutes(time: string, minutes: number) {
@@ -65,6 +75,7 @@ export function buildSchedule(
   deadline: string,
   availability: Availability,
   now = new Date(),
+  existingBlocks: ScheduleBlock[] = [],
 ): ScheduleResult {
   const deadlineDate = new Date(deadline);
   const startDate = new Date(now);
@@ -72,14 +83,59 @@ export function buildSchedule(
   deadlineDate.setHours(23, 59, 59, 999);
 
   const ordered = orderByDependencies(subtasks);
-  const blocks: ScheduleBlock[] = [];
+  const taskById = new Map(subtasks.map((subtask) => [subtask.id, subtask]));
+  const blocks: ScheduleBlock[] = existingBlocks
+    .filter((block) => {
+      const task = taskById.get(block.subtaskId);
+      return (
+        block.locked &&
+        task &&
+        task.status !== "completed" &&
+        task.status !== "blocked" &&
+        fromDateKey(block.date) >= startDate &&
+        fromDateKey(block.date) <= deadlineDate
+      );
+    })
+    .map((block) => ({ ...block, locked: true }));
+  const usedByDate = new Map<string, number>();
+  const lockedByTask = new Map<string, number>();
+
+  for (const block of blocks) {
+    usedByDate.set(
+      block.date,
+      (usedByDate.get(block.date) ?? 0) + block.durationMinutes,
+    );
+    lockedByTask.set(
+      block.subtaskId,
+      (lockedByTask.get(block.subtaskId) ?? 0) + block.durationMinutes,
+    );
+  }
+
   let dayOffset = 0;
-  let usedToday = 0;
-  let blockIndex = 0;
+  let blockIndex = blocks.length;
   let unscheduledMinutes = 0;
+  const blockedDependencies = new Set<string>();
 
   for (const subtask of ordered) {
-    let taskMinutes = subtask.estimatedMinutes;
+    let taskMinutes = Math.max(
+      0,
+      subtask.estimatedMinutes - (lockedByTask.get(subtask.id) ?? 0),
+    );
+
+    if (
+      subtask.status === "blocked" ||
+      subtask.dependencies.some((dependency) =>
+        blockedDependencies.has(dependency),
+      )
+    ) {
+      blockedDependencies.add(subtask.id);
+      unscheduledMinutes += taskMinutes;
+      continue;
+    }
+
+    const earliestDate = subtask.postponedUntil
+      ? fromDateKey(subtask.postponedUntil)
+      : startDate;
 
     while (taskMinutes > 0) {
       const date = addDays(startDate, dayOffset);
@@ -89,11 +145,17 @@ export function buildSchedule(
         break;
       }
 
+      if (date < earliestDate) {
+        dayOffset += 1;
+        continue;
+      }
+
+      const dateKey = toDateKey(date);
+      const usedToday = usedByDate.get(dateKey) ?? 0;
       const availableToday = availability.dailyMinutes - usedToday;
 
       if (availableToday <= 0) {
         dayOffset += 1;
-        usedToday = 0;
         continue;
       }
 
@@ -102,16 +164,50 @@ export function buildSchedule(
       blocks.push({
         id: `block-${blockIndex + 1}-${subtask.id}`,
         subtaskId: subtask.id,
-        date: toDateKey(date),
+        date: dateKey,
         startTime: addMinutes(availability.preferredTime, usedToday),
         durationMinutes,
+        locked: false,
       });
 
       taskMinutes -= durationMinutes;
-      usedToday += durationMinutes;
+      usedByDate.set(dateKey, usedToday + durationMinutes);
       blockIndex += 1;
     }
   }
 
-  return { blocks, unscheduledMinutes };
+  return {
+    blocks: blocks.sort(
+      (left, right) =>
+        left.date.localeCompare(right.date) ||
+        left.startTime.localeCompare(right.startTime),
+    ),
+    unscheduledMinutes,
+  };
+}
+
+export function calculateDeadlineRisk(
+  subtasks: Subtask[],
+  deadline: string,
+  availability: Availability,
+  now = new Date(),
+): DeadlineRisk {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(deadline);
+  end.setHours(23, 59, 59, 999);
+  const days = Math.max(
+    0,
+    Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1,
+  );
+  const remainingMinutes = subtasks
+    .filter((task) => task.status !== "completed")
+    .reduce((total, task) => total + task.estimatedMinutes, 0);
+  const capacityMinutes = days * availability.dailyMinutes;
+
+  return {
+    capacityMinutes,
+    remainingMinutes,
+    shortfallMinutes: Math.max(0, remainingMinutes - capacityMinutes),
+  };
 }
