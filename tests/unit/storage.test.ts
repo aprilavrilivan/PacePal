@@ -65,16 +65,19 @@ describe("local state ownership", () => {
 
     const state = loadAppState();
 
-    expect(state.assignment?.checkIn).toEqual({
+    expect(state.version).toBe(2);
+    expect(state.assignments).toHaveLength(1);
+    expect(state.selectedAssignmentId).toBe("assignment-1");
+    expect(state.assignments[0]?.checkIn).toEqual({
       availableMinutes: 30,
       energy: "medium",
     });
-    expect(state.assignment?.scheduleNotice).toBe("");
-    expect(state.assignment?.subtasks[0]).toMatchObject({
+    expect(state.assignments[0]?.scheduleNotice).toBe("");
+    expect(state.assignments[0]?.subtasks[0]).toMatchObject({
       actualMinutes: 0,
       activeSince: null,
       postponedUntil: null,
     });
-    expect(state.assignment?.schedule[0].locked).toBe(false);
+    expect(state.assignments[0]?.schedule[0].locked).toBe(false);
   });
 });

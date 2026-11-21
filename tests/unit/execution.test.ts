@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { recommendNextTask } from "@/features/pacepal/execution";
-import type { Subtask } from "@/features/pacepal/model";
+import {
+  recommendAcrossAssignments,
+  recommendNextTask,
+} from "@/features/pacepal/execution";
+import type { Assignment, Subtask } from "@/features/pacepal/model";
 
 const baseTask: Subtask = {
   actualMinutes: 0,
@@ -41,5 +44,53 @@ describe("recommendNextTask", () => {
       suggestedMinutes: 30,
       task: { id: "task-1" },
     });
+  });
+});
+
+function assignment(
+  id: string,
+  priority: Assignment["priority"],
+  deadline: string,
+  task: Subtask,
+): Assignment {
+  return {
+    availability: { dailyMinutes: 60, preferredTime: "18:00" },
+    chatMessages: [],
+    checkIn: { availableMinutes: 30, energy: "medium" },
+    createdAt: "2026-11-20T10:00:00.000Z",
+    deadline,
+    deliverable: "Report",
+    id,
+    priority,
+    requirements: "Complete the work",
+    schedule: [],
+    scheduleNotice: "",
+    status: "scheduled",
+    subtasks: [task],
+    title: id,
+    unscheduledMinutes: 0,
+  };
+}
+
+describe("recommendAcrossAssignments", () => {
+  it("ranks executable subtasks across every assignment", () => {
+    const result = recommendAcrossAssignments(
+      [
+        assignment("low-priority", "low", "2026-12-20T18:00:00.000Z", baseTask),
+        assignment("urgent", "high", "2026-11-22T18:00:00.000Z", {
+          ...baseTask,
+          id: "urgent-task",
+          difficulty: "low",
+        }),
+      ],
+      { availableMinutes: 30, energy: "medium" },
+      new Date("2026-11-21T18:00:00.000Z"),
+    );
+
+    expect(result).toMatchObject({
+      assignment: { id: "urgent" },
+      task: { id: "urgent-task" },
+    });
+    expect(result?.reasons).toContain("临近截止");
   });
 });

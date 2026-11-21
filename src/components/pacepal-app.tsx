@@ -17,7 +17,7 @@ import {
   type ScheduleBlock,
   type Subtask,
 } from "@/features/pacepal/model";
-import { recommendNextTask } from "@/features/pacepal/execution";
+import { recommendAcrossAssignments } from "@/features/pacepal/execution";
 import {
   generateMockPlan,
   normalizeDependencies,
@@ -209,7 +209,12 @@ export function PacePalApp() {
       if (!cloudEnabled) {
         if (!cancelled) {
           setAppState(storedState);
-          if (storedState.assignment?.status === "planning") setScreen("plan");
+          if (
+            storedState.assignments.find(
+              (item) => item.id === storedState.selectedAssignmentId,
+            )?.status === "planning"
+          )
+            setScreen("plan");
           setHydrated(true);
         }
         return;
@@ -230,7 +235,11 @@ export function PacePalApp() {
 
           if (!cancelled) {
             setAppState(storedState);
-            if (storedState.assignment?.status === "planning") {
+            if (
+              storedState.assignments.find(
+                (item) => item.id === storedState.selectedAssignmentId,
+              )?.status === "planning"
+            ) {
               setScreen("plan");
             }
             setSyncStatus("local");
@@ -254,7 +263,12 @@ export function PacePalApp() {
             setAppState(nextState);
             setCloudReady(true);
             setSyncStatus("synced");
-            if (nextState.assignment?.status === "planning") setScreen("plan");
+            if (
+              nextState.assignments.find(
+                (item) => item.id === nextState.selectedAssignmentId,
+              )?.status === "planning"
+            )
+              setScreen("plan");
           }
         }
       } catch {
@@ -298,7 +312,11 @@ export function PacePalApp() {
     return () => window.clearTimeout(saveTimer);
   }, [appState, cloudReady, hydrated, userId]);
 
-  const assignment = appState.assignment;
+  const assignments = appState.assignments;
+  const assignment =
+    assignments.find((item) => item.id === appState.selectedAssignmentId) ??
+    assignments[0] ??
+    null;
   const completedCount =
     assignment?.subtasks.filter((subtask) => subtask.status === "completed")
       .length ?? 0;
@@ -316,10 +334,11 @@ export function PacePalApp() {
 
   const recommendation = useMemo(
     () =>
-      assignment
-        ? recommendNextTask(assignment.subtasks, assignment.checkIn)
-        : null,
-    [assignment],
+      recommendAcrossAssignments(
+        assignments,
+        assignment?.checkIn ?? { availableMinutes: 30, energy: "medium" },
+      ),
+    [assignment?.checkIn, assignments],
   );
 
   const deadlineRisk = useMemo(
@@ -347,11 +366,25 @@ export function PacePalApp() {
     return Array.from(grouped.entries());
   }, [assignment]);
 
-  function updateAssignment(updater: (current: Assignment) => Assignment) {
+  function updateAssignment(
+    updater: (current: Assignment) => Assignment,
+    assignmentId = assignment?.id,
+  ) {
     setAppState((current) => {
-      if (!current.assignment) return current;
-      return { ...current, assignment: updater(current.assignment) };
+      if (!assignmentId) return current;
+      return {
+        ...current,
+        assignments: current.assignments.map((item) =>
+          item.id === assignmentId ? updater(item) : item,
+        ),
+      };
     });
+  }
+
+  function selectAssignment(id: string, view: DashboardView = "overview") {
+    setAppState((current) => ({ ...current, selectedAssignmentId: id }));
+    setDashboardView(view);
+    setScreen("dashboard");
   }
 
   function openAccount() {
@@ -476,7 +509,12 @@ export function PacePalApp() {
       chatMessages: [],
     };
 
-    setAppState({ version: 1, assignment: nextAssignment });
+    setAppState((current) => ({
+      ...current,
+      assignments: [...current.assignments, nextAssignment],
+      selectedAssignmentId: nextAssignment.id,
+      version: 2,
+    }));
     setEditingTaskId(null);
     setScreen("plan");
   }
@@ -586,7 +624,7 @@ export function PacePalApp() {
     setScreen("dashboard");
   }
 
-  function toggleCompleted(id: string) {
+  function toggleCompleted(id: string, assignmentId = assignment?.id) {
     updateAssignment((current) => {
       const now = new Date();
       const subtasks = current.subtasks.map((subtask) => {
@@ -605,42 +643,48 @@ export function PacePalApp() {
         "完成状态已更新，后续安排已重排",
         now,
       );
-    });
+    }, assignmentId);
   }
 
-  function startTask(id: string) {
+  function startTask(id: string, assignmentId = assignment?.id) {
     const now = new Date();
-    updateAssignment((current) => ({
-      ...current,
-      subtasks: current.subtasks.map((subtask) => {
-        if (subtask.id === id) {
-          return {
-            ...subtask,
-            activeSince: now.toISOString(),
-            postponedUntil: null,
-            status: "in_progress",
-          };
-        }
-        return subtask.status === "in_progress"
-          ? { ...settleActiveTime(subtask, now), status: "paused" }
-          : subtask;
+    updateAssignment(
+      (current) => ({
+        ...current,
+        subtasks: current.subtasks.map((subtask) => {
+          if (subtask.id === id) {
+            return {
+              ...subtask,
+              activeSince: now.toISOString(),
+              postponedUntil: null,
+              status: "in_progress",
+            };
+          }
+          return subtask.status === "in_progress"
+            ? { ...settleActiveTime(subtask, now), status: "paused" }
+            : subtask;
+        }),
       }),
-    }));
+      assignmentId,
+    );
   }
 
-  function pauseTask(id: string) {
+  function pauseTask(id: string, assignmentId = assignment?.id) {
     const now = new Date();
-    updateAssignment((current) => ({
-      ...current,
-      subtasks: current.subtasks.map((subtask) =>
-        subtask.id === id
-          ? { ...settleActiveTime(subtask, now), status: "paused" }
-          : subtask,
-      ),
-    }));
+    updateAssignment(
+      (current) => ({
+        ...current,
+        subtasks: current.subtasks.map((subtask) =>
+          subtask.id === id
+            ? { ...settleActiveTime(subtask, now), status: "paused" }
+            : subtask,
+        ),
+      }),
+      assignmentId,
+    );
   }
 
-  function postponeTask(id: string) {
+  function postponeTask(id: string, assignmentId = assignment?.id) {
     const now = new Date();
     updateAssignment((current) => {
       const subtasks = current.subtasks.map((subtask) =>
@@ -657,10 +701,10 @@ export function PacePalApp() {
         "任务已延至明天，后续安排已重排",
         now,
       );
-    });
+    }, assignmentId);
   }
 
-  function blockTask(id: string) {
+  function blockTask(id: string, assignmentId = assignment?.id) {
     const now = new Date();
     updateAssignment((current) => {
       const subtasks = current.subtasks.map((subtask) =>
@@ -676,10 +720,10 @@ export function PacePalApp() {
         "已标记卡住，相关任务暂未安排",
         now,
       );
-    });
+    }, assignmentId);
   }
 
-  function splitBlockedTask(id: string) {
+  function splitBlockedTask(id: string, assignmentId = assignment?.id) {
     const now = new Date();
     updateAssignment((current) => {
       const targetIndex = current.subtasks.findIndex((task) => task.id === id);
@@ -710,7 +754,7 @@ export function PacePalApp() {
         "已拆出一个 15 分钟的小步骤",
         now,
       );
-    });
+    }, assignmentId);
   }
 
   function updateCheckIn(patch: Partial<Assignment["checkIn"]>) {
@@ -808,10 +852,19 @@ export function PacePalApp() {
 
   function deleteAssignment() {
     if (!window.confirm("删除当前作业计划？")) return;
-    clearAppState();
-    setAppState(emptyAppState);
+    if (!assignment) return;
+    setAppState((current) => {
+      const assignments = current.assignments.filter(
+        (item) => item.id !== assignment.id,
+      );
+      return {
+        ...current,
+        assignments,
+        selectedAssignmentId: assignments[0]?.id ?? null,
+      };
+    });
     setScreen("dashboard");
-    setDashboardView("overview");
+    setDashboardView("tasks");
   }
 
   const appFrameProps = {
@@ -1377,8 +1430,9 @@ export function PacePalApp() {
         taskById.get(block.subtaskId)?.status !== "completed",
     ) ?? null;
   const recommendedTask = recommendation?.task ?? null;
+  const recommendedAssignment = recommendation?.assignment ?? assignment;
   const recommendedBlock = recommendedTask
-    ? (assignment.schedule.find(
+    ? (recommendedAssignment.schedule.find(
         (block) =>
           block.subtaskId === recommendedTask.id &&
           block.date >= currentDateKey(),
@@ -1399,20 +1453,28 @@ export function PacePalApp() {
   const remainingMinutes = assignment.subtasks
     .filter((task) => task.status !== "completed")
     .reduce((total, task) => total + task.estimatedMinutes, 0);
-  const todayBlocks = assignment.schedule.filter(
-    (block) => block.date === currentDateKey(),
+  const globalSchedule = assignments
+    .flatMap((item) =>
+      item.schedule.map((block) => ({ assignment: item, block })),
+    )
+    .sort(
+      (left, right) =>
+        left.block.date.localeCompare(right.block.date) ||
+        left.block.startTime.localeCompare(right.block.startTime),
+    );
+  const todayBlocks = globalSchedule.filter(
+    ({ block }) => block.date === currentDateKey(),
   );
-  const daysRemaining = Math.max(
-    0,
-    Math.ceil(
-      (new Date(assignment.deadline).getTime() -
-        new Date(`${currentDateKey()}T00:00:00`).getTime()) /
-        86_400_000,
-    ),
-  );
+  const allSubtasks = assignments.flatMap((item) => item.subtasks);
+  const allCompletedCount = allSubtasks.filter(
+    (task) => task.status === "completed",
+  ).length;
+  const allRemainingMinutes = allSubtasks
+    .filter((task) => task.status !== "completed")
+    .reduce((total, task) => total + task.estimatedMinutes, 0);
   const viewTitles: Record<DashboardView, string> = {
     assistant: "AI 助手",
-    overview: assignment.title,
+    overview: "今日重点",
     schedule: "安排",
     tasks: "任务",
   };
@@ -1437,29 +1499,49 @@ export function PacePalApp() {
               {viewTitles[dashboardView]}
             </h1>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm font-medium text-slate-500">
-              {dashboardView !== "overview" ? (
-                <span>{assignment.title}</span>
-              ) : null}
-              <span>截止 {formatDate(assignment.deadline)}</span>
-              <span>
-                {completedCount} / {assignment.subtasks.length} 完成
-              </span>
+              {dashboardView === "overview" ? (
+                <>
+                  <span>{assignments.length} 个主任务</span>
+                  <span>
+                    {allSubtasks.length - allCompletedCount} 个子任务待完成
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>{assignment.title}</span>
+                  <span>截止 {formatDate(assignment.deadline)}</span>
+                  <span>
+                    {completedCount} / {assignment.subtasks.length} 完成
+                  </span>
+                </>
+              )}
             </div>
           </div>
           <div className="flex gap-2">
+            {dashboardView !== "overview" ? (
+              <>
+                <button
+                  className={textButtonClassName}
+                  onClick={openEditAssignment}
+                  type="button"
+                >
+                  编辑作业
+                </button>
+                <button
+                  className={textButtonClassName}
+                  onClick={deleteAssignment}
+                  type="button"
+                >
+                  删除作业
+                </button>
+              </>
+            ) : null}
             <button
-              className={textButtonClassName}
-              onClick={openEditAssignment}
+              className={primaryButtonClassName}
+              onClick={openCreate}
               type="button"
             >
-              编辑作业
-            </button>
-            <button
-              className={textButtonClassName}
-              onClick={deleteAssignment}
-              type="button"
-            >
-              删除作业
+              新建任务
             </button>
           </div>
         </div>
@@ -1487,40 +1569,47 @@ export function PacePalApp() {
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-2xl bg-[#5b55df] p-5 text-white shadow-[0_16px_36px_rgba(91,85,223,0.22)]">
                 <p className="text-sm font-semibold text-violet-100">
-                  完成进度
+                  总体进度
                 </p>
                 <div className="mt-3 flex items-end justify-between gap-4">
                   <span className="text-4xl font-semibold tracking-[-0.05em]">
-                    {progress}%
+                    {allSubtasks.length
+                      ? Math.round(
+                          (allCompletedCount / allSubtasks.length) * 100,
+                        )
+                      : 0}
+                    %
                   </span>
                   <span className="text-sm font-medium text-violet-100">
-                    {completedCount}/{assignment.subtasks.length}
+                    {allCompletedCount}/{allSubtasks.length}
                   </span>
                 </div>
                 <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/20">
                   <div
-                    aria-label={`完成进度 ${progress}%`}
+                    aria-label="总体完成进度"
                     className="h-full rounded-full bg-white transition-[width]"
-                    style={{ width: `${progress}%` }}
+                    style={{
+                      width: `${allSubtasks.length ? Math.round((allCompletedCount / allSubtasks.length) * 100) : 0}%`,
+                    }}
                   />
                 </div>
               </div>
               <div className={`${surfaceClassName} p-5`}>
-                <p className="text-sm font-semibold text-slate-500">距离截止</p>
+                <p className="text-sm font-semibold text-slate-500">进行中</p>
                 <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
-                  {daysRemaining} 天
+                  {assignments.length} 个
                 </p>
                 <p className="mt-2 text-sm font-medium text-slate-500">
-                  {formatDate(assignment.deadline)}
+                  主任务
                 </p>
               </div>
               <div className={`${surfaceClassName} p-5`}>
                 <p className="text-sm font-semibold text-slate-500">剩余工作</p>
                 <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
-                  {remainingMinutes} 分钟
+                  {allRemainingMinutes} 分钟
                 </p>
                 <p className="mt-2 text-sm font-medium text-slate-500">
-                  {assignment.subtasks.length - completedCount} 个任务
+                  {allSubtasks.length - allCompletedCount} 个子任务
                 </p>
               </div>
             </div>
@@ -1550,6 +1639,25 @@ export function PacePalApp() {
                     <h3 className="max-w-2xl text-2xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-3xl">
                       {recommendedTask.title}
                     </h3>
+                    <button
+                      className="mt-3 text-sm font-semibold text-violet-600"
+                      onClick={() =>
+                        selectAssignment(recommendedAssignment.id, "tasks")
+                      }
+                      type="button"
+                    >
+                      {recommendedAssignment.title}
+                    </button>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {recommendation.reasons.map((reason) => (
+                        <span
+                          className="rounded-full bg-violet-50 px-3 py-1.5 text-sm font-semibold text-violet-700"
+                          key={reason}
+                        >
+                          {reason}
+                        </span>
+                      ))}
+                    </div>
                     <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
                       {recommendedTask.completionCriteria}
                     </p>
@@ -1563,7 +1671,12 @@ export function PacePalApp() {
                       {recommendedTask.status === "in_progress" ? (
                         <button
                           className={secondaryButtonClassName}
-                          onClick={() => pauseTask(recommendedTask.id)}
+                          onClick={() =>
+                            pauseTask(
+                              recommendedTask.id,
+                              recommendedAssignment.id,
+                            )
+                          }
                           type="button"
                         >
                           暂停
@@ -1571,7 +1684,12 @@ export function PacePalApp() {
                       ) : (
                         <button
                           className={primaryButtonClassName}
-                          onClick={() => startTask(recommendedTask.id)}
+                          onClick={() =>
+                            startTask(
+                              recommendedTask.id,
+                              recommendedAssignment.id,
+                            )
+                          }
                           type="button"
                         >
                           {recommendedTask.status === "paused"
@@ -1581,21 +1699,36 @@ export function PacePalApp() {
                       )}
                       <button
                         className={secondaryButtonClassName}
-                        onClick={() => toggleCompleted(recommendedTask.id)}
+                        onClick={() =>
+                          toggleCompleted(
+                            recommendedTask.id,
+                            recommendedAssignment.id,
+                          )
+                        }
                         type="button"
                       >
                         完成
                       </button>
                       <button
                         className={textButtonClassName}
-                        onClick={() => postponeTask(recommendedTask.id)}
+                        onClick={() =>
+                          postponeTask(
+                            recommendedTask.id,
+                            recommendedAssignment.id,
+                          )
+                        }
                         type="button"
                       >
                         延期
                       </button>
                       <button
                         className={textButtonClassName}
-                        onClick={() => blockTask(recommendedTask.id)}
+                        onClick={() =>
+                          blockTask(
+                            recommendedTask.id,
+                            recommendedAssignment.id,
+                          )
+                        }
                         type="button"
                       >
                         卡住了
@@ -1687,17 +1820,24 @@ export function PacePalApp() {
                 <ul className="mt-4 divide-y divide-slate-100">
                   {(todayBlocks.length > 0
                     ? todayBlocks
-                    : assignment.schedule.slice(0, 3)
-                  ).map((block) => (
+                    : globalSchedule.slice(0, 3)
+                  ).map(({ assignment: item, block }) => (
                     <li
                       className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-3 py-3.5"
-                      key={block.id}
+                      key={`${item.id}-${block.id}`}
                     >
                       <span className="text-sm font-semibold text-slate-500">
                         {block.startTime}
                       </span>
-                      <span className="truncate font-semibold text-slate-800">
-                        {taskById.get(block.subtaskId)?.title ?? "任务"}
+                      <span className="min-w-0">
+                        <span className="block truncate font-semibold text-slate-800">
+                          {item.subtasks.find(
+                            (task) => task.id === block.subtaskId,
+                          )?.title ?? "任务"}
+                        </span>
+                        <span className="block truncate text-sm font-medium text-slate-400">
+                          {item.title}
+                        </span>
                       </span>
                       <span className="text-sm font-medium text-slate-400">
                         {block.durationMinutes} 分钟
@@ -1705,7 +1845,7 @@ export function PacePalApp() {
                     </li>
                   ))}
                 </ul>
-                {assignment.schedule.length === 0 ? (
+                {globalSchedule.length === 0 ? (
                   <p className="mt-4 text-slate-500">当前没有待安排任务。</p>
                 ) : null}
               </div>
@@ -1735,12 +1875,50 @@ export function PacePalApp() {
 
         {dashboardView === "tasks" ? (
           <section>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {assignments.map((item) => {
+                const done = item.subtasks.filter(
+                  (task) => task.status === "completed",
+                ).length;
+                const selected = item.id === assignment.id;
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={`rounded-2xl border p-5 text-left transition focus:ring-4 focus:ring-violet-500/10 focus:outline-none ${
+                      selected
+                        ? "border-violet-300 bg-violet-50 shadow-[0_10px_28px_rgba(91,85,223,0.10)]"
+                        : "border-slate-200 bg-white hover:border-violet-200"
+                    }`}
+                    key={item.id}
+                    onClick={() => selectAssignment(item.id, "tasks")}
+                    type="button"
+                  >
+                    <span className="block text-lg font-semibold text-slate-950">
+                      {item.title}
+                    </span>
+                    <span className="mt-3 flex items-center justify-between gap-3 text-sm font-semibold text-slate-500">
+                      <span>截止 {formatDate(item.deadline)}</span>
+                      <span>
+                        {done}/{item.subtasks.length}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+              <button
+                className="flex min-h-28 items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-white p-5 font-semibold text-violet-700 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
+                onClick={openCreate}
+                type="button"
+              >
+                ＋ 新建任务
+              </button>
+            </div>
             <div className="flex items-center justify-between gap-4">
-              <p className="font-medium text-slate-500">
+              <p className="mt-8 font-medium text-slate-500">
                 {remainingMinutes} 分钟待完成
               </p>
               <button
-                className={secondaryButtonClassName}
+                className={`${secondaryButtonClassName} mt-8`}
                 onClick={() => setScreen("plan")}
                 type="button"
               >
@@ -1796,6 +1974,24 @@ export function PacePalApp() {
         {dashboardView === "assistant" ? (
           <section className="grid gap-5 lg:grid-cols-[18rem_1fr]">
             <aside className="space-y-5">
+              <div className={`${surfaceClassName} p-5`}>
+                <FormField label="正在调整">
+                  <select
+                    className={fieldClassName}
+                    id="assistant-assignment"
+                    onChange={(event) =>
+                      selectAssignment(event.target.value, "assistant")
+                    }
+                    value={assignment.id}
+                  >
+                    {assignments.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.title}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+              </div>
               <div className={`${surfaceClassName} p-5`}>
                 <h2 className="font-semibold text-slate-950">当前计划</h2>
                 <dl className="mt-5 space-y-4">

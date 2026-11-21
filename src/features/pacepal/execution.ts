@@ -1,9 +1,15 @@
-import type { CheckIn, Subtask } from "@/features/pacepal/model";
+import type { Assignment, CheckIn, Subtask } from "@/features/pacepal/model";
 
 export type TaskRecommendation = {
   isPartial: boolean;
   suggestedMinutes: number;
   task: Subtask;
+};
+
+export type GlobalTaskRecommendation = TaskRecommendation & {
+  assignment: Assignment;
+  reasons: string[];
+  score: number;
 };
 
 const energyRank = { low: 1, medium: 2, high: 3 } as const;
@@ -66,4 +72,90 @@ export function recommendNextTask(
     suggestedMinutes: Math.min(task.estimatedMinutes, checkIn.availableMinutes),
     task,
   };
+}
+
+const priorityScore: Record<Assignment["priority"], number> = {
+  high: 30,
+  medium: 20,
+  low: 10,
+};
+
+function hourFromTime(value: string) {
+  return Number(value.split(":")[0]);
+}
+
+export function recommendAcrossAssignments(
+  assignments: Assignment[],
+  checkIn: CheckIn,
+  now = new Date(),
+): GlobalTaskRecommendation | null {
+  const today = dateKey(now);
+  const currentHour = now.getHours();
+  const candidates: GlobalTaskRecommendation[] = [];
+
+  for (const assignment of assignments) {
+    const completed = new Set(
+      assignment.subtasks
+        .filter((task) => task.status === "completed")
+        .map((task) => task.id),
+    );
+    const daysRemaining = Math.max(
+      0,
+      (new Date(assignment.deadline).getTime() - now.getTime()) / 86_400_000,
+    );
+    const urgency = Math.max(0, 35 - Math.min(35, daysRemaining * 2.5));
+    const preferredHour = hourFromTime(assignment.availability.preferredTime);
+    const hourDistance = Math.min(
+      Math.abs(currentHour - preferredHour),
+      24 - Math.abs(currentHour - preferredHour),
+    );
+    const timeOfDayFit = Math.max(0, 10 - hourDistance * 2);
+
+    for (const task of assignment.subtasks) {
+      if (
+        task.status === "completed" ||
+        task.status === "blocked" ||
+        (task.postponedUntil && task.postponedUntil > today) ||
+        !task.dependencies.every((dependency) => completed.has(dependency))
+      ) {
+        continue;
+      }
+
+      const fitsTime = task.estimatedMinutes <= checkIn.availableMinutes;
+      const fitsEnergy =
+        energyRank[task.difficulty] <= energyRank[checkIn.energy];
+      const continuity =
+        task.status === "in_progress" ? 16 : task.status === "paused" ? 8 : 0;
+      const score =
+        priorityScore[assignment.priority] +
+        urgency +
+        (fitsEnergy ? 15 : -10) +
+        (fitsTime ? 10 : 4) +
+        timeOfDayFit +
+        continuity;
+      const reasons = [
+        daysRemaining < 3
+          ? "临近截止"
+          : assignment.priority === "high"
+            ? "优先级高"
+            : "当前可推进",
+        fitsEnergy ? "匹配当前精力" : "建议先完成一部分",
+        fitsTime ? "适合可用时间" : `先做 ${checkIn.availableMinutes} 分钟`,
+      ];
+
+      candidates.push({
+        assignment,
+        isPartial: !fitsTime,
+        reasons,
+        score,
+        suggestedMinutes: Math.min(
+          task.estimatedMinutes,
+          checkIn.availableMinutes,
+        ),
+        task,
+      });
+    }
+  }
+
+  return candidates.sort((left, right) => right.score - left.score)[0] ?? null;
 }

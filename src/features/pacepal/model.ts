@@ -72,10 +72,27 @@ export const assignmentSchema = assignmentInputSchema.extend({
   chatMessages: z.array(chatMessageSchema).default([]),
 });
 
-export const appStateSchema = z.object({
+const legacyAppStateSchema = z.object({
   version: z.literal(1),
   assignment: assignmentSchema.nullable(),
 });
+
+const currentAppStateSchema = z.object({
+  version: z.literal(2),
+  assignments: z.array(assignmentSchema),
+  selectedAssignmentId: z.string().nullable(),
+});
+
+export const appStateSchema = z
+  .union([currentAppStateSchema, legacyAppStateSchema])
+  .transform((state) => {
+    if (state.version === 2) return state;
+    return {
+      version: 2 as const,
+      assignments: state.assignment ? [state.assignment] : [],
+      selectedAssignmentId: state.assignment?.id ?? null,
+    };
+  });
 
 export type AssignmentInput = z.infer<typeof assignmentInputSchema>;
 export type Subtask = z.infer<typeof subtaskSchema>;
@@ -88,6 +105,7 @@ export type Assignment = z.infer<typeof assignmentSchema>;
 export type AppState = z.infer<typeof appStateSchema>;
 
 export const emptyAppState: AppState = {
-  version: 1,
-  assignment: null,
+  version: 2,
+  assignments: [],
+  selectedAssignmentId: null,
 };

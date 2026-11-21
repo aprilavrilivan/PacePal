@@ -45,14 +45,12 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await page.getByLabel("开始时间").fill("18:00");
   await page.getByRole("button", { name: "生成安排" }).click();
 
-  await expect(
-    page.getByRole("heading", { name: "媒介研究课程论文" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今日重点" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "此刻状态" })).toBeVisible();
 
   await page.getByLabel("可用时间").selectOption("30");
   await page.getByRole("button", { exact: true, name: "开始" }).click();
-  await expect(page.getByText("进行中", { exact: true })).toBeVisible();
+  await expect(page.getByText("进行中", { exact: true }).last()).toBeVisible();
   await page.getByRole("button", { exact: true, name: "暂停" }).click();
   await expect(page.getByText("已暂停", { exact: true })).toBeVisible();
   await page.getByRole("button", { exact: true, name: "继续" }).click();
@@ -74,9 +72,43 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(page.getByText("已锁定", { exact: true }).first()).toBeVisible();
 
   await page.reload();
-  await expect(
-    page.getByRole("heading", { name: "媒介研究课程论文" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今日重点" })).toBeVisible();
+  await expect(page.getByText("1 个主任务", { exact: true })).toBeVisible();
+});
+
+test("keeps multiple assignments and lets the user switch between them", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
+
+  async function createAssignment(title: string, daysFromNow: number) {
+    await page
+      .getByRole("button", { name: /创建作业|新建任务/ })
+      .first()
+      .click();
+    await page.getByLabel("作业名称").fill(title);
+    await page.getByLabel("作业要求").fill("完成资料整理、初稿和复核。 ");
+    await page.getByLabel("成果形式").fill("课程作业");
+    const deadline = new Date();
+    deadline.setDate(deadline.getDate() + daysFromNow);
+    const value = `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`;
+    await page.getByLabel("截止时间").fill(value);
+    await page.getByRole("button", { name: "保存并生成任务" }).click();
+    await page.getByRole("button", { name: "确认任务计划" }).click();
+    await page.getByRole("button", { name: "生成安排" }).click();
+  }
+
+  await createAssignment("课程论文", 10);
+  await createAssignment("项目汇报", 5);
+
+  await expect(page.getByText("2 个主任务", { exact: true })).toBeVisible();
+  await page.getByRole("button", { exact: true, name: "任务" }).click();
+  await expect(page.getByRole("button", { name: /课程论文/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /项目汇报/ })).toBeVisible();
+  await page.getByRole("button", { name: /课程论文/ }).click();
+  await expect(page.getByText("课程论文").first()).toBeVisible();
 });
 
 test("reports a healthy mock foundation", async ({ request }) => {
