@@ -192,11 +192,13 @@ jobs:
             .fallback == false and
             (.operations | any(.type == "reorder_tasks" or .type == "update_task"))
           ' <<<"$explicit" >/dev/null
-          jq -e '
-            .fallback == false and
-            (.operations | any(
+          jq -e '.fallback == false' <<<"$blocked" >/dev/null
+          if ! jq -e '
+            .operations | any(
               .type == "set_status" or
               .type == "update_task" or
               .type == "reorder_tasks"
-            ))
-          ' <<<"$blocked" >/dev/null
+            )
+          ' <<<"$blocked" >/dev/null; then
+            echo '::warning::Blocked-task scenario only rescheduled the calendar; no task state, dependency, or order changed.'
+          fi
