@@ -13,11 +13,12 @@ import { serverEnvironment } from "@/lib/env/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function unchangedPlan(output: RefinementOutput, fallbackReason: string) {
+function fallbackPlan(output: RefinementOutput, fallbackReason: string) {
   return {
     ...output,
-    assistantMessage: "这次没有修改计划，请再试一次。",
-    changed: false,
+    assistantMessage: output.changed
+      ? output.assistantMessage
+      : "AI 暂时不可用，我没有擅自修改你的计划。请稍后重试。",
     fallback: true,
     fallbackReason,
     model: gatewayModel,
@@ -40,17 +41,26 @@ export async function POST(request: Request) {
       });
     }
 
+    let gatewayError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return Response.json({
+          ...(await generateGatewayRefinement(assignment, message)),
+          fallback: false,
+          fallbackReason: null,
+          model: gatewayModel,
+        });
+      } catch (error) {
+        gatewayError = error;
+      }
+    }
+
     try {
-      return Response.json({
-        ...(await generateGatewayRefinement(assignment, message)),
-        fallback: false,
-        fallbackReason: null,
-        model: gatewayModel,
-      });
+      throw gatewayError;
     } catch (error) {
       console.error("AI Gateway refinement failed", error);
       return Response.json(
-        unchangedPlan(mockOutput, classifyGatewayFailure(error)),
+        fallbackPlan(mockOutput, classifyGatewayFailure(error)),
       );
     }
   } catch (error) {

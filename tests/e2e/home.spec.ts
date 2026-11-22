@@ -66,6 +66,13 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(
     page.getByText("30 分钟", { exact: true }).first(),
   ).toBeVisible();
+  await page.getByLabel("给 AI 助手的消息").fill("我已经完成了理解作业要求");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(
+    page.getByText(
+      "已将“理解作业要求”标记为完成，并根据当前进度重排后续任务。",
+    ),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "安排" }).click();
   await page.getByRole("button", { exact: true, name: "锁定" }).first().click();

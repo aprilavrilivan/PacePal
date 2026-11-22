@@ -24,7 +24,7 @@ import {
 } from "@/features/pacepal/mock-planner";
 import { requestPlan } from "@/features/pacepal/plan-api";
 import {
-  mergeRefinement,
+  applyRefinement,
   requestRefinement,
 } from "@/features/pacepal/refinement";
 import {
@@ -468,12 +468,49 @@ export function PacePalApp() {
     if (Object.keys(nextErrors).length > 0) return;
 
     if (formMode === "edit" && assignment) {
-      updateAssignment((current) =>
-        rebuildAssignmentSchedule(
-          { ...current, ...form },
-          "作业信息已更新，安排已重算",
-        ),
-      );
+      const planningFieldsChanged =
+        form.title !== assignment.title ||
+        form.requirements !== assignment.requirements ||
+        form.deliverable !== assignment.deliverable;
+      const candidate = { ...assignment, ...form };
+      setPlanBusy(true);
+
+      if (planningFieldsChanged) {
+        try {
+          const response = await requestRefinement(
+            candidate,
+            "作业名称、要求或成果形式已经修改。请重新理解目标，只调整尚未完成的任务，保留已完成工作，并重新安排后续计划。",
+          );
+          updateAssignment((current) => {
+            const edited = { ...current, ...form };
+            const refined = response.changed
+              ? applyRefinement(edited, response)
+              : edited;
+            return rebuildAssignmentSchedule(
+              refined,
+              response.changed
+                ? "作业信息与后续任务已更新"
+                : "作业信息已更新，安排已重算",
+            );
+          });
+        } catch {
+          updateAssignment((current) =>
+            rebuildAssignmentSchedule(
+              { ...current, ...form },
+              "作业信息已更新；AI 暂时不可用，原任务已保留",
+            ),
+          );
+        }
+      } else {
+        updateAssignment((current) =>
+          rebuildAssignmentSchedule(
+            { ...current, ...form },
+            "截止时间或优先级已更新，安排已重算",
+          ),
+        );
+      }
+
+      setPlanBusy(false);
       setScreen(assignment.status === "scheduled" ? "dashboard" : "plan");
       return;
     }
@@ -817,7 +854,7 @@ export function PacePalApp() {
 
       updateAssignment((current) => {
         const refined = response.changed
-          ? mergeRefinement(current, response)
+          ? applyRefinement(current, response)
           : current;
         const next = response.changed
           ? rebuildAssignmentSchedule(refined, "AI 已更新任务和安排")
@@ -1106,7 +1143,9 @@ export function PacePalApp() {
                 type="submit"
               >
                 {planBusy
-                  ? "正在生成"
+                  ? formMode === "create"
+                    ? "正在生成"
+                    : "正在更新"
                   : formMode === "create"
                     ? "保存并生成任务"
                     : "保存"}

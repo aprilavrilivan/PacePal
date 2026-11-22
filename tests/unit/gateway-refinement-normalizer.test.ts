@@ -58,12 +58,34 @@ describe("gateway refinement normalization", () => {
 
     expect(output).toMatchObject({
       assistantMessage: "已调整每日时间。",
-      availability: { dailyMinutes: 45, preferredTime: "19:00" },
       changed: true,
     });
-    expect(output.subtasks[0]).toMatchObject({
-      estimatedMinutes: 60,
-      id: "research",
+    expect(output.operations).toEqual(
+      expect.arrayContaining([
+        {
+          availability: { dailyMinutes: 45, preferredTime: "19:00" },
+          type: "set_availability",
+        },
+      ]),
+    );
+  });
+
+  it("normalizes a progress operation without rewriting the task list", () => {
+    const output = normalizeGatewayRefinement(
+      {
+        assistantMessage: "已记录研究完成。",
+        operations: [
+          { type: "complete_task", taskId: "research" },
+          { type: "reschedule" },
+        ],
+      },
+      assignment,
+    );
+
+    expect(output.operations).toContainEqual({
+      status: "completed",
+      taskId: "research",
+      type: "set_status",
     });
   });
 });
