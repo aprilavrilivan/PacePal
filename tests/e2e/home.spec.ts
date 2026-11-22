@@ -64,10 +64,26 @@ test("creates, approves, schedules, and persists an assignment", async ({
     name: "AI 对话调整",
   });
   await expect(assistantPanel).toBeVisible();
-  await page.getByRole("button", { name: "隐藏 AI" }).click();
+  await page.getByRole("button", { name: "AI任务调整" }).click();
   await expect(assistantPanel).toBeHidden();
-  await page.getByRole("button", { name: "显示 AI" }).click();
+  await page.getByRole("button", { name: "AI任务调整" }).click();
   await expect(assistantPanel).toBeVisible();
+
+  await page.getByRole("button", { name: "手动任务调整" }).click();
+  await expect(assistantPanel).toBeHidden();
+  await page.getByLabel("任务名称 2").fill("资料检索与核实");
+  await page.getByLabel("任务名称 2").press("Tab");
+  const manualRows = page.locator('[data-testid^="manual-subtask-"]');
+  await page
+    .getByRole("button", { name: "拖动 理解作业要求" })
+    .dragTo(manualRows.nth(2));
+  await expect(page.getByLabel("任务名称 3")).toHaveValue("理解作业要求");
+  await page.getByRole("button", { name: "添加子任务" }).click();
+  await expect(page.getByLabel("任务名称 9")).toHaveValue("新子任务");
+
+  await page.getByRole("button", { name: "AI任务调整" }).click();
+  await expect(assistantPanel).toBeVisible();
+  await expect(page.getByText("资料检索与核实")).toBeVisible();
   await expect(page.getByRole("heading", { name: "PacePal" })).toBeVisible();
   await page.getByRole("button", { name: "我每天只有 30 分钟" }).click();
   await expect(

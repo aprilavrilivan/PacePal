@@ -44,6 +44,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 type Screen = "dashboard" | "create" | "plan" | "availability" | "account";
 type DashboardView = "overview" | "tasks" | "schedule";
+type TaskAdjustmentMode = "ai" | "manual" | null;
 type SyncStatus = "local" | "loading" | "saving" | "synced" | "error";
 type FormErrors = Partial<Record<keyof AssignmentInput, string>>;
 
@@ -197,7 +198,10 @@ export function PacePalApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [chatDraft, setChatDraft] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
-  const [taskAssistantOpen, setTaskAssistantOpen] = useState(true);
+  const [taskAdjustmentMode, setTaskAdjustmentMode] =
+    useState<TaskAdjustmentMode>("ai");
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
   const userId = user?.id ?? null;
 
   useEffect(() => {
@@ -611,6 +615,85 @@ export function PacePalApp() {
       ]),
     }));
     setEditingTaskId(id);
+  }
+
+  function applyManualSubtasks(
+    current: Assignment,
+    subtasks: Subtask[],
+    normalizeOrder = true,
+  ): Assignment {
+    const adjusted = {
+      ...current,
+      subtasks: normalizeOrder ? normalizeDependencies(subtasks) : subtasks,
+    };
+    return current.status === "scheduled"
+      ? rebuildAssignmentSchedule(adjusted, "手动调整已应用，安排已重算")
+      : adjusted;
+  }
+
+  function updateManualSubtask(id: string, patch: Partial<Subtask>) {
+    updateAssignment((current) =>
+      applyManualSubtasks(
+        current,
+        current.subtasks.map((subtask) =>
+          subtask.id === id ? { ...subtask, ...patch } : subtask,
+        ),
+        false,
+      ),
+    );
+  }
+
+  function addManualSubtask() {
+    const id = createId("task");
+    updateAssignment((current) =>
+      applyManualSubtasks(current, [
+        ...current.subtasks,
+        {
+          actualMinutes: 0,
+          activeSince: null,
+          completionCriteria: "完成这一步的目标",
+          dependencies: [],
+          description: "写下完成这一步需要做什么",
+          difficulty: "medium",
+          estimatedMinutes: 30,
+          id,
+          postponedUntil: null,
+          status: "todo",
+          title: "新子任务",
+        },
+      ]),
+    );
+  }
+
+  function deleteManualSubtask(id: string) {
+    if (!assignment || assignment.subtasks.length <= 1) return;
+    if (!window.confirm("删除这个子任务？")) return;
+    updateAssignment((current) =>
+      applyManualSubtasks(
+        current,
+        current.subtasks.filter((subtask) => subtask.id !== id),
+      ),
+    );
+  }
+
+  function reorderManualSubtasks(sourceId: string, targetId: string) {
+    if (sourceId === targetId) return;
+    updateAssignment((current) => {
+      const sourceIndex = current.subtasks.findIndex(
+        (subtask) => subtask.id === sourceId,
+      );
+      const targetIndex = current.subtasks.findIndex(
+        (subtask) => subtask.id === targetId,
+      );
+      if (sourceIndex < 0 || targetIndex < 0) return current;
+
+      const reordered = [...current.subtasks];
+      const [moved] = reordered.splice(sourceIndex, 1);
+      reordered.splice(targetIndex, 0, moved);
+      return applyManualSubtasks(current, reordered);
+    });
+    setDraggedTaskId(null);
+    setDragOverTaskId(null);
   }
 
   function approvePlan() {
@@ -1906,7 +1989,7 @@ export function PacePalApp() {
                   className="mt-7 inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-2.5 font-semibold text-slate-950 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-400/30 focus:outline-none"
                   onClick={() => {
                     setDashboardView("tasks");
-                    setTaskAssistantOpen(true);
+                    setTaskAdjustmentMode("ai");
                   }}
                   type="button"
                 >
@@ -1964,74 +2047,134 @@ export function PacePalApp() {
               <div className="mt-8 flex flex-wrap gap-2">
                 <button
                   aria-controls="task-ai-panel"
-                  aria-expanded={taskAssistantOpen}
-                  className={secondaryButtonClassName}
-                  onClick={() => setTaskAssistantOpen((open) => !open)}
+                  aria-expanded={taskAdjustmentMode === "ai"}
+                  className={
+                    taskAdjustmentMode === "ai"
+                      ? primaryButtonClassName
+                      : secondaryButtonClassName
+                  }
+                  onClick={() =>
+                    setTaskAdjustmentMode((mode) =>
+                      mode === "ai" ? null : "ai",
+                    )
+                  }
                   type="button"
                 >
-                  {taskAssistantOpen ? "隐藏 AI" : "显示 AI"}
+                  AI任务调整
                 </button>
                 <button
-                  className={secondaryButtonClassName}
-                  onClick={() => setScreen("plan")}
+                  aria-controls="manual-task-editor"
+                  aria-expanded={taskAdjustmentMode === "manual"}
+                  className={
+                    taskAdjustmentMode === "manual"
+                      ? primaryButtonClassName
+                      : secondaryButtonClassName
+                  }
+                  onClick={() =>
+                    setTaskAdjustmentMode((mode) =>
+                      mode === "manual" ? null : "manual",
+                    )
+                  }
                   type="button"
                 >
-                  编辑任务计划
+                  手动任务调整
                 </button>
               </div>
             </div>
             <div
               className={`mt-5 grid items-start gap-5 ${
-                taskAssistantOpen
+                taskAdjustmentMode === "ai"
                   ? "xl:grid-cols-[minmax(0,1fr)_minmax(24rem,0.78fr)]"
                   : ""
               }`}
             >
               <ul
                 className={`${surfaceClassName} divide-y divide-slate-100 overflow-hidden`}
+                id={
+                  taskAdjustmentMode === "manual"
+                    ? "manual-task-editor"
+                    : undefined
+                }
               >
-                {assignment.subtasks.map((subtask) => (
-                  <li
-                    className="flex items-start gap-4 px-5 py-4 sm:px-6"
-                    key={subtask.id}
-                  >
-                    <input
-                      aria-label={`完成 ${subtask.title}`}
-                      checked={subtask.status === "completed"}
-                      className="mt-0.5 size-5 rounded border-slate-300 accent-violet-600"
-                      onChange={() => toggleCompleted(subtask.id)}
-                      type="checkbox"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <span
-                        className={`font-semibold ${
-                          subtask.status === "completed"
-                            ? "text-slate-400 line-through"
-                            : "text-slate-900"
-                        }`}
+                {taskAdjustmentMode === "manual"
+                  ? assignment.subtasks.map((subtask, index) => (
+                      <ManualSubtaskRow
+                        canDelete={assignment.subtasks.length > 1}
+                        index={index}
+                        isDragOver={dragOverTaskId === subtask.id}
+                        key={subtask.id}
+                        onChange={(patch) =>
+                          updateManualSubtask(subtask.id, patch)
+                        }
+                        onDelete={() => deleteManualSubtask(subtask.id)}
+                        onDragEnd={() => {
+                          setDraggedTaskId(null);
+                          setDragOverTaskId(null);
+                        }}
+                        onDragEnter={() => setDragOverTaskId(subtask.id)}
+                        onDragStart={() => setDraggedTaskId(subtask.id)}
+                        onDrop={() => {
+                          if (draggedTaskId) {
+                            reorderManualSubtasks(draggedTaskId, subtask.id);
+                          }
+                        }}
+                        onToggleCompleted={() => toggleCompleted(subtask.id)}
+                        subtask={subtask}
+                      />
+                    ))
+                  : assignment.subtasks.map((subtask) => (
+                      <li
+                        className="flex items-start gap-4 px-5 py-4 sm:px-6"
+                        key={subtask.id}
                       >
-                        {subtask.title}
-                      </span>
-                      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-sm font-medium text-slate-500">
-                        <span>{statusLabels[subtask.status]}</span>
-                        <span>计划 {subtask.estimatedMinutes} 分钟</span>
-                        <span>实际 {subtask.actualMinutes} 分钟</span>
-                      </div>
-                      {subtask.status === "blocked" ? (
-                        <button
-                          className={`${textButtonClassName} mt-2 -ml-2.5`}
-                          onClick={() => splitBlockedTask(subtask.id)}
-                          type="button"
-                        >
-                          拆小一步
-                        </button>
-                      ) : null}
-                    </div>
+                        <input
+                          aria-label={`完成 ${subtask.title}`}
+                          checked={subtask.status === "completed"}
+                          className="mt-0.5 size-5 rounded border-slate-300 accent-violet-600"
+                          onChange={() => toggleCompleted(subtask.id)}
+                          type="checkbox"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <span
+                            className={`font-semibold ${
+                              subtask.status === "completed"
+                                ? "text-slate-400 line-through"
+                                : "text-slate-900"
+                            }`}
+                          >
+                            {subtask.title}
+                          </span>
+                          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-sm font-medium text-slate-500">
+                            <span>{statusLabels[subtask.status]}</span>
+                            <span>计划 {subtask.estimatedMinutes} 分钟</span>
+                            <span>实际 {subtask.actualMinutes} 分钟</span>
+                          </div>
+                          {subtask.status === "blocked" ? (
+                            <button
+                              className={`${textButtonClassName} mt-2 -ml-2.5`}
+                              onClick={() => splitBlockedTask(subtask.id)}
+                              type="button"
+                            >
+                              拆小一步
+                            </button>
+                          ) : null}
+                        </div>
+                      </li>
+                    ))}
+                {taskAdjustmentMode === "manual" ? (
+                  <li className="p-4 sm:p-5">
+                    <button
+                      className="flex min-h-12 w-full items-center justify-center rounded-xl border border-dashed border-violet-300 font-semibold text-violet-700 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
+                      onClick={addManualSubtask}
+                      type="button"
+                    >
+                      ＋ 添加子任务
+                    </button>
                   </li>
-                ))}
+                ) : null}
               </ul>
 
-              {taskAssistantOpen ? (
+              {taskAdjustmentMode === "ai" ? (
                 <aside
                   aria-label="AI 对话调整"
                   className={`${surfaceClassName} flex min-h-[620px] flex-col overflow-hidden xl:sticky xl:top-6 xl:max-h-[calc(100dvh-3rem)]`}
@@ -2053,7 +2196,7 @@ export function PacePalApp() {
                     </div>
                     <button
                       className={textButtonClassName}
-                      onClick={() => setTaskAssistantOpen(false)}
+                      onClick={() => setTaskAdjustmentMode(null)}
                       type="button"
                     >
                       隐藏
@@ -2439,6 +2582,186 @@ function FormField({
         </p>
       ) : null}
     </div>
+  );
+}
+
+function ManualSubtaskRow({
+  canDelete,
+  index,
+  isDragOver,
+  onChange,
+  onDelete,
+  onDragEnd,
+  onDragEnter,
+  onDragStart,
+  onDrop,
+  onToggleCompleted,
+  subtask,
+}: {
+  canDelete: boolean;
+  index: number;
+  isDragOver: boolean;
+  onChange: (patch: Partial<Subtask>) => void;
+  onDelete: () => void;
+  onDragEnd: () => void;
+  onDragEnter: () => void;
+  onDragStart: () => void;
+  onDrop: () => void;
+  onToggleCompleted: () => void;
+  subtask: Subtask;
+}) {
+  const [title, setTitle] = useState(subtask.title);
+  const [description, setDescription] = useState(subtask.description);
+  const [completionCriteria, setCompletionCriteria] = useState(
+    subtask.completionCriteria,
+  );
+  const [estimatedMinutes, setEstimatedMinutes] = useState(
+    String(subtask.estimatedMinutes),
+  );
+
+  function commitText(
+    value: string,
+    fallback: string,
+    patch: (normalized: string) => Partial<Subtask>,
+    setValue: (normalized: string) => void,
+  ) {
+    const normalized = value.trim() || fallback;
+    setValue(normalized);
+    if (normalized !== fallback) onChange(patch(normalized));
+  }
+
+  function commitMinutes() {
+    const parsed = Number.parseInt(estimatedMinutes, 10);
+    const normalized = Number.isFinite(parsed) ? Math.max(5, parsed) : 30;
+    setEstimatedMinutes(String(normalized));
+    if (normalized !== subtask.estimatedMinutes) {
+      onChange({ estimatedMinutes: normalized });
+    }
+  }
+
+  return (
+    <li
+      className={`px-4 py-4 transition sm:px-5 ${
+        isDragOver ? "bg-violet-50 ring-2 ring-violet-300 ring-inset" : ""
+      }`}
+      data-testid={`manual-subtask-${subtask.id}`}
+      onDragEnter={onDragEnter}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop();
+      }}
+    >
+      <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]">
+        <button
+          aria-label={`拖动 ${subtask.title}`}
+          className="cursor-grab rounded-lg px-2 py-2 text-xl leading-none text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:ring-4 focus:ring-violet-500/10 focus:outline-none active:cursor-grabbing"
+          draggable
+          onDragEnd={onDragEnd}
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", subtask.id);
+            onDragStart();
+          }}
+          type="button"
+        >
+          ⠿
+        </button>
+        <input
+          aria-label={`完成 ${subtask.title}`}
+          checked={subtask.status === "completed"}
+          className="size-5 shrink-0 rounded border-slate-300 accent-violet-600"
+          onChange={onToggleCompleted}
+          type="checkbox"
+        />
+        <label className="sr-only" htmlFor={`manual-title-${subtask.id}`}>
+          任务名称 {index + 1}
+        </label>
+        <input
+          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 font-semibold text-slate-950 transition outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10"
+          id={`manual-title-${subtask.id}`}
+          onBlur={() =>
+            commitText(
+              title,
+              subtask.title,
+              (normalized) => ({ title: normalized }),
+              setTitle,
+            )
+          }
+          onChange={(event) => setTitle(event.target.value)}
+          value={title}
+        />
+        <label className="sr-only" htmlFor={`manual-minutes-${subtask.id}`}>
+          预计分钟 {index + 1}
+        </label>
+        <div className="col-start-3 flex shrink-0 items-center gap-2 sm:col-start-auto">
+          <input
+            className="w-20 rounded-lg border border-slate-200 bg-white px-3 py-2 text-right text-slate-950 transition outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10"
+            id={`manual-minutes-${subtask.id}`}
+            min={5}
+            onBlur={commitMinutes}
+            onChange={(event) => setEstimatedMinutes(event.target.value)}
+            step={5}
+            type="number"
+            value={estimatedMinutes}
+          />
+          <span className="text-sm font-medium text-slate-500">分钟</span>
+        </div>
+        <button
+          aria-label={`删除 ${subtask.title}`}
+          className={`${textButtonClassName} col-start-3 justify-self-start sm:col-start-auto`}
+          disabled={!canDelete}
+          onClick={onDelete}
+          type="button"
+        >
+          删除
+        </button>
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 sm:pl-12">
+        <label className="sr-only" htmlFor={`manual-description-${subtask.id}`}>
+          具体行动 {index + 1}
+        </label>
+        <input
+          className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 transition outline-none focus:border-violet-500 focus:bg-white focus:ring-4 focus:ring-violet-500/10"
+          id={`manual-description-${subtask.id}`}
+          onBlur={() =>
+            commitText(
+              description,
+              subtask.description,
+              (normalized) => ({ description: normalized }),
+              setDescription,
+            )
+          }
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder="具体行动"
+          value={description}
+        />
+        <label className="sr-only" htmlFor={`manual-criteria-${subtask.id}`}>
+          完成标准 {index + 1}
+        </label>
+        <input
+          className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 transition outline-none focus:border-violet-500 focus:bg-white focus:ring-4 focus:ring-violet-500/10"
+          id={`manual-criteria-${subtask.id}`}
+          onBlur={() =>
+            commitText(
+              completionCriteria,
+              subtask.completionCriteria,
+              (normalized) => ({ completionCriteria: normalized }),
+              setCompletionCriteria,
+            )
+          }
+          onChange={(event) => setCompletionCriteria(event.target.value)}
+          placeholder="完成标准"
+          value={completionCriteria}
+        />
+      </div>
+      <p className="mt-2 text-sm font-medium text-slate-400 sm:pl-12">
+        {statusLabels[subtask.status]}
+        {subtask.actualMinutes > 0
+          ? ` · 实际 ${subtask.actualMinutes} 分钟`
+          : ""}
+      </p>
+    </li>
   );
 }
 
