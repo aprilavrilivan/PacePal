@@ -112,3 +112,87 @@ jobs:
             sleep 10
           done
           exit 1
+
+      - name: Probe dynamic replanning behavior
+        shell: bash
+        run: |
+          deadline="$(date -u -d '+21 days' '+%Y-%m-%dT18:00:00.000Z')"
+          assignment="$(jq -n --arg deadline "$deadline" '
+            def task($id; $title; $minutes; $dependencies; $status): {
+              id: $id,
+              title: $title,
+              description: $title,
+              estimatedMinutes: $minutes,
+              completionCriteria: ("完成" + $title),
+              difficulty: (if $minutes >= 90 then "high" elif $minutes >= 45 then "medium" else "low" end),
+              dependencies: $dependencies,
+              status: $status,
+              actualMinutes: 0,
+              activeSince: null,
+              postponedUntil: null
+            };
+            {
+              id: "dynamic-replanning-smoke",
+              createdAt: "2026-11-22T00:00:00.000Z",
+              status: "scheduled",
+              title: "GEA 课程论文",
+              requirements: "完成一篇中国近代史课程论文，需要可靠史料、清晰论点和规范格式。",
+              deliverable: "3000 字课程论文",
+              deadline: $deadline,
+              priority: "high",
+              subtasks: [
+                task("topic"; "拆解作业需求与定主题"; 30; []; "completed"),
+                task("sources"; "查找并核实基础史料"; 60; ["topic"]; "todo"),
+                task("outline"; "撰写论文大纲"; 45; ["sources"]; "todo"),
+                task("draft"; "撰写正文第一稿"; 120; ["outline"]; "todo"),
+                task("polish"; "润色与格式检查"; 45; ["draft"]; "todo"),
+                task("submit"; "最终提交前的核对"; 15; ["polish"]; "todo")
+              ],
+              availability: {dailyMinutes: 60, preferredTime: "18:00"},
+              schedule: [],
+              unscheduledMinutes: 0,
+              checkIn: {availableMinutes: 30, energy: "medium"},
+              scheduleNotice: "",
+              chatMessages: []
+            }
+          ')"
+
+          probe() {
+            local name="$1"
+            local message="$2"
+            local response
+            response="$(jq -n --argjson assignment "$assignment" --arg message "$message" \
+              '{assignment: $assignment, message: $message}' | \
+              curl -fsS --max-time 90 \
+                -H 'Content-Type: application/json' \
+                --data-binary @- \
+                https://pace-pal-eta.vercel.app/api/refine)"
+            echo "### $name" >> "$GITHUB_STEP_SUMMARY"
+            jq -r '"- fallback: `\(.fallback)`\n- assistant: \(.assistantMessage)\n- operations: `\(.operations | map(.type) | join(", "))`"' \
+              <<<"$response" >> "$GITHUB_STEP_SUMMARY"
+            jq -c '{fallback, model, assistantMessage, operations}' <<<"$response"
+          }
+
+          vague="$(probe \
+            '原计划合理时的模糊请求' \
+            '重新平衡后续任务')"
+          explicit="$(probe \
+            '明确要求改变顺序' \
+            '我已经有足够资料可以开始构思。请先写论文大纲，再补充核实史料，然后写初稿，并据此真正调整任务顺序和依赖关系。')"
+          blocked="$(probe \
+            '关键任务受阻后的主动调整' \
+            '查找基础史料卡住了，明天才能拿到档案。今天有 120 分钟，请先安排不依赖档案、现在就能推进的工作。')"
+
+          jq -e '.fallback == false' <<<"$vague" >/dev/null
+          jq -e '
+            .fallback == false and
+            (.operations | any(.type == "reorder_tasks" or .type == "update_task"))
+          ' <<<"$explicit" >/dev/null
+          jq -e '
+            .fallback == false and
+            (.operations | any(
+              .type == "set_status" or
+              .type == "update_task" or
+              .type == "reorder_tasks"
+            ))
+          ' <<<"$blocked" >/dev/null
