@@ -6,6 +6,7 @@ import {
   type RefinementOperation,
   type RefinementOutput,
 } from "@/features/pacepal/refinement";
+import { findReferencedTask } from "@/features/pacepal/refinement-intent";
 
 const recordSchema = z.record(z.string(), z.unknown());
 
@@ -182,12 +183,18 @@ function directOperation(
     const status = statusFor(
       valueFor(source, ["status", "value", "newStatus"]) || rawType,
     );
-    return taskId && status ? { type: "set_status", taskId, status } : null;
+    const current = assignment.subtasks.find((task) => task.id === taskId);
+    return current &&
+      status &&
+      current.status !== "completed" &&
+      current.status !== status
+      ? { type: "set_status", taskId, status }
+      : null;
   }
 
   if (/update|modify|edit/.test(rawType) && taskId) {
     const current = assignment.subtasks.find((task) => task.id === taskId);
-    if (!current) return null;
+    if (!current || current.status === "completed") return null;
     const patch = taskPatch(
       valueFor(source, ["patch", "changes", "task"]) ?? source,
       current,
@@ -212,22 +219,40 @@ function directOperation(
   }
 
   if (/remove|delete/.test(rawType) && taskId) {
-    return { type: "remove_task", taskId };
+    const current = assignment.subtasks.find((task) => task.id === taskId);
+    return current && current.status !== "completed"
+      ? { type: "remove_task", taskId }
+      : null;
   }
 
   if (/reorder|sort/.test(rawType)) {
     const taskIds = valueFor(source, ["taskIds", "task_ids", "order"]);
-    return Array.isArray(taskIds)
-      ? {
-          type: "reorder_tasks",
-          taskIds: taskIds.map(String).filter(Boolean),
-        }
+    if (!Array.isArray(taskIds)) return null;
+    const currentOrder = assignment.subtasks
+      .filter((task) => task.status !== "completed")
+      .map((task) => task.id);
+    const validIds = new Set(currentOrder);
+    const requested = taskIds
+      .map(String)
+      .filter(
+        (id, index, all) => validIds.has(id) && all.indexOf(id) === index,
+      );
+    const completeOrder = [
+      ...requested,
+      ...currentOrder.filter((id) => !requested.includes(id)),
+    ];
+    return completeOrder.some((id, index) => id !== currentOrder[index])
+      ? { type: "reorder_tasks", taskIds: completeOrder }
       : null;
   }
 
   if (/availability|capacity|time/.test(rawType)) {
     const availability = availabilityPatch(source);
-    return Object.keys(availability).length > 0
+    const changesAvailability = Object.entries(availability).some(
+      ([key, next]) =>
+        assignment.availability[key as keyof typeof availability] !== next,
+    );
+    return changesAvailability
       ? { type: "set_availability", availability }
       : null;
   }
@@ -266,7 +291,7 @@ function operationsFromLegacyPlan(value: unknown, assignment: Assignment) {
     }
 
     const patch = taskPatch(rawTask, current);
-    if (Object.keys(patch).length > 0) {
+    if (current.status !== "completed" && Object.keys(patch).length > 0) {
       operations.push({
         type: "update_task",
         taskId: current.id,
@@ -277,7 +302,7 @@ function operationsFromLegacyPlan(value: unknown, assignment: Assignment) {
       });
     }
     const status = statusFor(valueFor(source, ["status", "state"]));
-    if (status && status !== current.status) {
+    if (current.status !== "completed" && status && status !== current.status) {
       operations.push({ type: "set_status", taskId: current.id, status });
     }
   });
@@ -297,6 +322,7 @@ function operationsFromLegacyPlan(value: unknown, assignment: Assignment) {
 export function normalizeGatewayRefinement(
   value: unknown,
   assignment: Assignment,
+  message = "",
 ): RefinementOutput {
   const source = record(value);
   const rawOperations = valueFor(source, ["operations", "changes", "actions"]);
@@ -315,10 +341,74 @@ export function normalizeGatewayRefinement(
   ]);
   if (Array.isArray(completedIds)) {
     for (const taskId of completedIds.map(String)) {
-      if (assignment.subtasks.some((task) => task.id === taskId)) {
+      if (
+        assignment.subtasks.some(
+          (task) => task.id === taskId && task.status !== "completed",
+        )
+      ) {
         operations.push({ type: "set_status", taskId, status: "completed" });
       }
     }
+  }
+
+  const reportsBlocker = /(卡住|受阻|无法继续|blocked)/i.test(message);
+  if (
+    reportsBlocker &&
+    !operations.some(
+      (operation) =>
+        operation.type === "set_status" && operation.status === "blocked",
+    )
+  ) {
+    const blockedTask = findReferencedTask(assignment, message);
+    if (blockedTask) {
+      operations.unshift({
+        type: "set_status",
+        taskId: blockedTask.id,
+        status: "blocked",
+      });
+    }
+  }
+
+  const asksForExplicitOrder = /(先[\s\S]+再|优先|顺序|排序|重排)/.test(
+    message,
+  );
+  if (asksForExplicitOrder) {
+    const reorder = operations.find(
+      (
+        operation,
+      ): operation is Extract<RefinementOperation, { type: "reorder_tasks" }> =>
+        operation.type === "reorder_tasks",
+    );
+    if (reorder) {
+      const position = new Map(
+        reorder.taskIds.map((taskId, index) => [taskId, index]),
+      );
+      for (const taskId of reorder.taskIds) {
+        const task = assignment.subtasks.find((item) => item.id === taskId);
+        if (!task || task.status === "completed") continue;
+        const dependencies = task.dependencies.filter((dependency) => {
+          const dependencyPosition = position.get(dependency);
+          return (
+            dependencyPosition == null ||
+            dependencyPosition < (position.get(taskId) ?? 0)
+          );
+        });
+        if (dependencies.length !== task.dependencies.length) {
+          operations.unshift({
+            type: "update_task",
+            taskId,
+            patch: { dependencies },
+          });
+        }
+      }
+    }
+  }
+
+  if (
+    operations.some((operation) => operation.type !== "reschedule") &&
+    !operations.some((operation) => operation.type === "reschedule")
+  ) {
+    operations.push({ type: "reschedule" });
   }
 
   const deduplicated = operations
@@ -332,15 +422,49 @@ export function normalizeGatewayRefinement(
     .slice(0, 24);
   const changed = deduplicated.length > 0;
 
+  const taskById = new Map(
+    assignment.subtasks.map((task) => [task.id, task.title]),
+  );
+  const blocked = deduplicated.find(
+    (operation) =>
+      operation.type === "set_status" && operation.status === "blocked",
+  );
+  const reordered = deduplicated.some(
+    (operation) => operation.type === "reorder_tasks",
+  );
+  const dependenciesChanged = deduplicated.some(
+    (operation) =>
+      operation.type === "update_task" &&
+      operation.patch.dependencies !== undefined,
+  );
+  const availabilityChanged = deduplicated.some(
+    (operation) => operation.type === "set_availability",
+  );
+  const onlyRescheduled =
+    deduplicated.length === 1 && deduplicated[0]?.type === "reschedule";
+
+  let verifiedMessage = stringFor(source, [
+    "assistantMessage",
+    "assistant_message",
+    "message",
+    "response",
+    "summary",
+  ]);
+  if (blocked?.type === "set_status") {
+    verifiedMessage = `已将“${taskById.get(blocked.taskId) ?? "相关任务"}”标记为卡住，并重新安排其他可执行任务。`;
+  } else if (reordered && dependenciesChanged) {
+    verifiedMessage = "已调整任务顺序和依赖关系，并重新计算后续日程。";
+  } else if (reordered) {
+    verifiedMessage = "已调整任务顺序，并重新计算后续日程。";
+  } else if (availabilityChanged) {
+    verifiedMessage = "已更新可用时间，并重新计算后续日程。";
+  } else if (onlyRescheduled) {
+    verifiedMessage = "已重新计算后续日程，任务内容和顺序保持不变。";
+  }
+
   return refinementOutputSchema.parse({
     assistantMessage:
-      stringFor(source, [
-        "assistantMessage",
-        "assistant_message",
-        "message",
-        "response",
-        "summary",
-      ]) ||
+      verifiedMessage ||
       (changed
         ? "已根据你的最新情况更新计划。"
         : "我没有找到需要修改的计划内容。"),

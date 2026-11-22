@@ -89,12 +89,26 @@ function uniqueId(proposed: string, usedIds: Set<string>) {
 
 function normalizeDependencies(subtasks: Subtask[]) {
   const ids = new Set(subtasks.map((task) => task.id));
-  return subtasks.map((task) => ({
-    ...task,
-    dependencies: task.dependencies.filter(
-      (dependency) => dependency !== task.id && ids.has(dependency),
-    ),
-  }));
+  const completedIds = new Set(
+    subtasks
+      .filter((task) => task.status === "completed")
+      .map((task) => task.id),
+  );
+  const earlierIds = new Set<string>();
+
+  return subtasks.map((task) => {
+    const normalized = {
+      ...task,
+      dependencies: task.dependencies.filter(
+        (dependency) =>
+          dependency !== task.id &&
+          ids.has(dependency) &&
+          (earlierIds.has(dependency) || completedIds.has(dependency)),
+      ),
+    };
+    earlierIds.add(task.id);
+    return normalized;
+  });
 }
 
 export async function requestRefinement(
@@ -134,7 +148,7 @@ export function applyRefinement(
   for (const operation of output.operations) {
     if (operation.type === "set_status") {
       subtasks = subtasks.map((task) =>
-        task.id === operation.taskId
+        task.id === operation.taskId && task.status !== "completed"
           ? {
               ...task,
               activeSince:
@@ -150,7 +164,9 @@ export function applyRefinement(
 
     if (operation.type === "update_task") {
       subtasks = subtasks.map((task) =>
-        task.id === operation.taskId ? { ...task, ...operation.patch } : task,
+        task.id === operation.taskId && task.status !== "completed"
+          ? { ...task, ...operation.patch }
+          : task,
       );
       continue;
     }
@@ -190,11 +206,19 @@ export function applyRefinement(
       const order = new Map(
         operation.taskIds.map((taskId, index) => [taskId, index]),
       );
-      subtasks = [...subtasks].sort((left, right) => {
-        const leftOrder = order.get(left.id) ?? Number.MAX_SAFE_INTEGER;
-        const rightOrder = order.get(right.id) ?? Number.MAX_SAFE_INTEGER;
-        return leftOrder - rightOrder;
-      });
+      const reorderedPending = subtasks
+        .filter((task) => task.status !== "completed")
+        .sort((left, right) => {
+          const leftOrder = order.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+          const rightOrder = order.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+          return leftOrder - rightOrder;
+        });
+      let pendingIndex = 0;
+      subtasks = subtasks.map((task) =>
+        task.status === "completed"
+          ? task
+          : (reorderedPending[pendingIndex++] ?? task),
+      );
       continue;
     }
 

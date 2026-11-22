@@ -89,4 +89,71 @@ describe("plan refinement", () => {
     expect(refined.subtasks[0]?.status).toBe("completed");
     expect(refined.subtasks[1]?.status).toBe("paused");
   });
+
+  it("reorders pending tasks without moving completed work", () => {
+    const multiTaskAssignment: Assignment = {
+      ...assignment,
+      subtasks: [
+        {
+          ...assignment.subtasks[0],
+          id: "done",
+          status: "completed",
+          title: "Done",
+        },
+        { ...assignment.subtasks[0], id: "research", title: "Research" },
+        {
+          ...assignment.subtasks[0],
+          dependencies: ["research"],
+          id: "outline",
+          title: "Outline",
+        },
+      ],
+    };
+    const refined = applyRefinement(multiTaskAssignment, {
+      assistantMessage: "Reordered",
+      changed: true,
+      operations: [
+        {
+          patch: { dependencies: [] },
+          taskId: "outline",
+          type: "update_task",
+        },
+        {
+          taskIds: ["outline", "research"],
+          type: "reorder_tasks",
+        },
+      ],
+    });
+
+    expect(refined.subtasks.map((task) => task.id)).toEqual([
+      "done",
+      "outline",
+      "research",
+    ]);
+    expect(refined.subtasks[1]?.dependencies).toEqual([]);
+  });
+
+  it("never reopens or rewrites completed work", () => {
+    const completedAssignment: Assignment = {
+      ...assignment,
+      subtasks: [{ ...assignment.subtasks[0], status: "completed" }],
+    };
+    const refined = applyRefinement(completedAssignment, {
+      assistantMessage: "Changed",
+      changed: true,
+      operations: [
+        { status: "todo", taskId: "research", type: "set_status" },
+        {
+          patch: { title: "Rewritten" },
+          taskId: "research",
+          type: "update_task",
+        },
+      ],
+    });
+
+    expect(refined.subtasks[0]).toMatchObject({
+      status: "completed",
+      title: "Research",
+    });
+  });
 });

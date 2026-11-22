@@ -190,15 +190,16 @@ jobs:
           jq -e '.fallback == false' <<<"$vague" >/dev/null
           jq -e '
             .fallback == false and
-            (.operations | any(.type == "reorder_tasks" or .type == "update_task"))
+            (.operations | any(.type == "reorder_tasks")) and
+            (.operations | any(
+              .type == "update_task" and
+              .patch.dependencies != null
+            ))
           ' <<<"$explicit" >/dev/null
-          jq -e '.fallback == false' <<<"$blocked" >/dev/null
-          if ! jq -e '
-            .operations | any(
-              .type == "set_status" or
-              .type == "update_task" or
-              .type == "reorder_tasks"
-            )
-          ' <<<"$blocked" >/dev/null; then
-            echo '::warning::Blocked-task scenario only rescheduled the calendar; no task state, dependency, or order changed.'
-          fi
+          jq -e '
+            .fallback == false and
+            (.operations | any(
+              .type == "set_status" and
+              .status == "blocked"
+            ))
+          ' <<<"$blocked" >/dev/null

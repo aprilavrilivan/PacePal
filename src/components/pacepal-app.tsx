@@ -856,8 +856,14 @@ export function PacePalApp() {
         const refined = response.changed
           ? applyRefinement(current, response)
           : current;
+        const changedTaskPlan = response.operations.some(
+          (operation) => operation.type !== "reschedule",
+        );
         const next = response.changed
-          ? rebuildAssignmentSchedule(refined, "AI 已更新任务和安排")
+          ? rebuildAssignmentSchedule(
+              refined,
+              changedTaskPlan ? "AI 调整已应用" : "后续日程已重新计算",
+            )
           : refined;
         return {
           ...next,
@@ -2113,7 +2119,7 @@ export function PacePalApp() {
                 ))}
                 {chatBusy ? (
                   <div className="max-w-[80%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 font-medium text-slate-500 shadow-sm">
-                    正在调整计划…
+                    正在分析进度与依赖…
                   </div>
                 ) : null}
               </div>
@@ -2123,7 +2129,7 @@ export function PacePalApp() {
                   {[
                     "把当前任务拆小",
                     "我每天只有 30 分钟",
-                    "重新平衡后续任务",
+                    "依据进度和阻塞优化计划",
                   ].map((prompt) => (
                     <button
                       className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus:ring-4 focus:ring-violet-500/10 focus:outline-none disabled:opacity-50"
