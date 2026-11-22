@@ -43,7 +43,7 @@ import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 type Screen = "dashboard" | "create" | "plan" | "availability" | "account";
-type DashboardView = "overview" | "tasks" | "assistant" | "schedule";
+type DashboardView = "overview" | "tasks" | "schedule";
 type SyncStatus = "local" | "loading" | "saving" | "synced" | "error";
 type FormErrors = Partial<Record<keyof AssignmentInput, string>>;
 
@@ -197,6 +197,7 @@ export function PacePalApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [chatDraft, setChatDraft] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  const [taskAssistantOpen, setTaskAssistantOpen] = useState(true);
   const userId = user?.id ?? null;
 
   useEffect(() => {
@@ -320,10 +321,6 @@ export function PacePalApp() {
   const completedCount =
     assignment?.subtasks.filter((subtask) => subtask.status === "completed")
       .length ?? 0;
-  const progress = assignment?.subtasks.length
-    ? Math.round((completedCount / assignment.subtasks.length) * 100)
-    : 0;
-
   const taskById = useMemo(
     () =>
       new Map(
@@ -1518,7 +1515,6 @@ export function PacePalApp() {
     .filter((task) => task.status !== "completed")
     .reduce((total, task) => total + task.estimatedMinutes, 0);
   const viewTitles: Record<DashboardView, string> = {
-    assistant: "AI 助手",
     overview: "今日重点",
     schedule: "安排",
     tasks: "任务",
@@ -1908,10 +1904,13 @@ export function PacePalApp() {
                 </p>
                 <button
                   className="mt-7 inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-2.5 font-semibold text-slate-950 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-400/30 focus:outline-none"
-                  onClick={() => setDashboardView("assistant")}
+                  onClick={() => {
+                    setDashboardView("tasks");
+                    setTaskAssistantOpen(true);
+                  }}
                   type="button"
                 >
-                  打开 AI 助手
+                  打开 AI 调整
                 </button>
               </div>
             </div>
@@ -1958,212 +1957,190 @@ export function PacePalApp() {
                 ＋ 新建任务
               </button>
             </div>
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <p className="mt-8 font-medium text-slate-500">
                 {remainingMinutes} 分钟待完成
               </p>
-              <button
-                className={`${secondaryButtonClassName} mt-8`}
-                onClick={() => setScreen("plan")}
-                type="button"
-              >
-                编辑任务计划
-              </button>
-            </div>
-            <ul
-              className={`${surfaceClassName} mt-5 divide-y divide-slate-100 overflow-hidden`}
-            >
-              {assignment.subtasks.map((subtask) => (
-                <li
-                  className="flex items-start gap-4 px-5 py-4 sm:px-6"
-                  key={subtask.id}
+              <div className="mt-8 flex flex-wrap gap-2">
+                <button
+                  aria-controls="task-ai-panel"
+                  aria-expanded={taskAssistantOpen}
+                  className={secondaryButtonClassName}
+                  onClick={() => setTaskAssistantOpen((open) => !open)}
+                  type="button"
                 >
-                  <input
-                    aria-label={`完成 ${subtask.title}`}
-                    checked={subtask.status === "completed"}
-                    className="mt-0.5 size-5 rounded border-slate-300 accent-violet-600"
-                    onChange={() => toggleCompleted(subtask.id)}
-                    type="checkbox"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <span
-                      className={`font-semibold ${
-                        subtask.status === "completed"
-                          ? "text-slate-400 line-through"
-                          : "text-slate-900"
-                      }`}
-                    >
-                      {subtask.title}
-                    </span>
-                    <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-sm font-medium text-slate-500">
-                      <span>{statusLabels[subtask.status]}</span>
-                      <span>计划 {subtask.estimatedMinutes} 分钟</span>
-                      <span>实际 {subtask.actualMinutes} 分钟</span>
-                    </div>
-                    {subtask.status === "blocked" ? (
-                      <button
-                        className={`${textButtonClassName} mt-2 -ml-2.5`}
-                        onClick={() => splitBlockedTask(subtask.id)}
-                        type="button"
-                      >
-                        拆小一步
-                      </button>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        {dashboardView === "assistant" ? (
-          <section className="grid gap-5 lg:grid-cols-[18rem_1fr]">
-            <aside className="space-y-5">
-              <div className={`${surfaceClassName} p-5`}>
-                <FormField label="正在调整">
-                  <select
-                    className={fieldClassName}
-                    id="assistant-assignment"
-                    onChange={(event) =>
-                      selectAssignment(event.target.value, "assistant")
-                    }
-                    value={assignment.id}
-                  >
-                    {assignments.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.title}
-                      </option>
-                    ))}
-                  </select>
-                </FormField>
+                  {taskAssistantOpen ? "隐藏 AI" : "显示 AI"}
+                </button>
+                <button
+                  className={secondaryButtonClassName}
+                  onClick={() => setScreen("plan")}
+                  type="button"
+                >
+                  编辑任务计划
+                </button>
               </div>
-              <div className={`${surfaceClassName} p-5`}>
-                <h2 className="font-semibold text-slate-950">当前计划</h2>
-                <dl className="mt-5 space-y-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <dt className="text-sm font-medium text-slate-500">进度</dt>
-                    <dd className="font-semibold text-slate-950">
-                      {progress}%
-                    </dd>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <dt className="text-sm font-medium text-slate-500">剩余</dt>
-                    <dd className="font-semibold text-slate-950">
-                      {remainingMinutes} 分钟
-                    </dd>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <dt className="text-sm font-medium text-slate-500">每天</dt>
-                    <dd className="font-semibold text-slate-950">
-                      {assignment.availability.dailyMinutes} 分钟
-                    </dd>
-                  </div>
-                </dl>
-              </div>
-              {recommendedTask ? (
-                <div className={`${surfaceClassName} p-5`}>
-                  <p className="text-sm font-semibold text-violet-600">
-                    当前下一步
-                  </p>
-                  <h2 className="mt-3 font-semibold text-slate-950">
-                    {recommendedTask.title}
-                  </h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">
-                    {recommendedTask.estimatedMinutes} 分钟
-                  </p>
-                </div>
-              ) : null}
-            </aside>
-
+            </div>
             <div
-              className={`${surfaceClassName} flex min-h-[620px] flex-col overflow-hidden`}
+              className={`mt-5 grid items-start gap-5 ${
+                taskAssistantOpen
+                  ? "xl:grid-cols-[minmax(0,1fr)_minmax(24rem,0.78fr)]"
+                  : ""
+              }`}
             >
-              <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-10 items-center justify-center rounded-xl bg-violet-100 font-bold text-violet-700">
-                    AI
-                  </div>
-                  <div>
-                    <h2 className="font-semibold text-slate-950">PacePal</h2>
-                    <p className="text-sm font-medium text-emerald-600">
-                      可以直接修改计划
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                aria-live="polite"
-                className="flex-1 space-y-4 overflow-y-auto bg-slate-50/60 px-5 py-6 sm:px-7"
+              <ul
+                className={`${surfaceClassName} divide-y divide-slate-100 overflow-hidden`}
               >
-                {assignment.chatMessages.length === 0 ? (
-                  <div className="max-w-[80%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 leading-7 text-slate-700 shadow-sm">
-                    告诉我哪里需要调整，我会更新任务和后续安排。
-                  </div>
-                ) : null}
-                {assignment.chatMessages.map((message) => (
-                  <div
-                    className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-                    key={message.id}
+                {assignment.subtasks.map((subtask) => (
+                  <li
+                    className="flex items-start gap-4 px-5 py-4 sm:px-6"
+                    key={subtask.id}
                   >
-                    <p
-                      className={`max-w-[82%] rounded-2xl px-4 py-3 leading-7 shadow-sm ${
-                        message.role === "user"
-                          ? "rounded-tr-md bg-[#5b55df] text-white"
-                          : "rounded-tl-md border border-slate-200 bg-white text-slate-700"
-                      }`}
-                    >
-                      {message.content}
-                    </p>
-                  </div>
+                    <input
+                      aria-label={`完成 ${subtask.title}`}
+                      checked={subtask.status === "completed"}
+                      className="mt-0.5 size-5 rounded border-slate-300 accent-violet-600"
+                      onChange={() => toggleCompleted(subtask.id)}
+                      type="checkbox"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <span
+                        className={`font-semibold ${
+                          subtask.status === "completed"
+                            ? "text-slate-400 line-through"
+                            : "text-slate-900"
+                        }`}
+                      >
+                        {subtask.title}
+                      </span>
+                      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-sm font-medium text-slate-500">
+                        <span>{statusLabels[subtask.status]}</span>
+                        <span>计划 {subtask.estimatedMinutes} 分钟</span>
+                        <span>实际 {subtask.actualMinutes} 分钟</span>
+                      </div>
+                      {subtask.status === "blocked" ? (
+                        <button
+                          className={`${textButtonClassName} mt-2 -ml-2.5`}
+                          onClick={() => splitBlockedTask(subtask.id)}
+                          type="button"
+                        >
+                          拆小一步
+                        </button>
+                      ) : null}
+                    </div>
+                  </li>
                 ))}
-                {chatBusy ? (
-                  <div className="max-w-[80%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 font-medium text-slate-500 shadow-sm">
-                    正在分析进度与依赖…
-                  </div>
-                ) : null}
-              </div>
+              </ul>
 
-              <div className="border-t border-slate-100 bg-white p-4 sm:p-5">
-                <div className="mb-3 flex flex-wrap gap-2">
-                  {[
-                    "把当前任务拆小",
-                    "我每天只有 30 分钟",
-                    "依据进度和阻塞优化计划",
-                  ].map((prompt) => (
+              {taskAssistantOpen ? (
+                <aside
+                  aria-label="AI 对话调整"
+                  className={`${surfaceClassName} flex min-h-[620px] flex-col overflow-hidden xl:sticky xl:top-6 xl:max-h-[calc(100dvh-3rem)]`}
+                  id="task-ai-panel"
+                >
+                  <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 font-bold text-violet-700">
+                        AI
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className="font-semibold text-slate-950">
+                          PacePal
+                        </h2>
+                        <p className="truncate text-sm font-medium text-slate-500">
+                          {assignment.title}
+                        </p>
+                      </div>
+                    </div>
                     <button
-                      className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus:ring-4 focus:ring-violet-500/10 focus:outline-none disabled:opacity-50"
-                      disabled={chatBusy}
-                      key={prompt}
-                      onClick={() => void sendChatMessage(prompt)}
+                      className={textButtonClassName}
+                      onClick={() => setTaskAssistantOpen(false)}
                       type="button"
                     >
-                      {prompt}
+                      隐藏
                     </button>
-                  ))}
-                </div>
-                <form className="flex items-end gap-3" onSubmit={submitChat}>
-                  <label className="sr-only" htmlFor="chat-message">
-                    给 AI 助手的消息
-                  </label>
-                  <textarea
-                    className="min-h-12 flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-950 transition outline-none focus:border-violet-500 focus:bg-white focus:ring-4 focus:ring-violet-500/10"
-                    disabled={chatBusy}
-                    id="chat-message"
-                    onChange={(event) => setChatDraft(event.target.value)}
-                    placeholder="输入你想调整的内容"
-                    rows={1}
-                    value={chatDraft}
-                  />
-                  <button
-                    className={primaryButtonClassName}
-                    disabled={chatBusy || !chatDraft.trim()}
-                    type="submit"
+                  </div>
+
+                  <div
+                    aria-live="polite"
+                    className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50/60 px-5 py-6 sm:px-6"
                   >
-                    发送
-                  </button>
-                </form>
-              </div>
+                    {assignment.chatMessages.length === 0 ? (
+                      <div className="max-w-[88%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 leading-7 text-slate-700 shadow-sm">
+                        告诉我哪里需要调整，我会更新任务和后续安排。
+                      </div>
+                    ) : null}
+                    {assignment.chatMessages.map((message) => (
+                      <div
+                        className={`flex ${
+                          message.role === "user"
+                            ? "justify-end"
+                            : "justify-start"
+                        }`}
+                        key={message.id}
+                      >
+                        <p
+                          className={`max-w-[88%] rounded-2xl px-4 py-3 leading-7 shadow-sm ${
+                            message.role === "user"
+                              ? "rounded-tr-md bg-[#5b55df] text-white"
+                              : "rounded-tl-md border border-slate-200 bg-white text-slate-700"
+                          }`}
+                        >
+                          {message.content}
+                        </p>
+                      </div>
+                    ))}
+                    {chatBusy ? (
+                      <div className="max-w-[88%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 font-medium text-slate-500 shadow-sm">
+                        正在分析进度与依赖…
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="border-t border-slate-100 bg-white p-4 sm:p-5">
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      {[
+                        "把当前任务拆小",
+                        "我每天只有 30 分钟",
+                        "依据进度和阻塞优化计划",
+                      ].map((prompt) => (
+                        <button
+                          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus:ring-4 focus:ring-violet-500/10 focus:outline-none disabled:opacity-50"
+                          disabled={chatBusy}
+                          key={prompt}
+                          onClick={() => void sendChatMessage(prompt)}
+                          type="button"
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                    <form
+                      className="flex items-end gap-3"
+                      onSubmit={submitChat}
+                    >
+                      <label className="sr-only" htmlFor="chat-message">
+                        给 AI 助手的消息
+                      </label>
+                      <textarea
+                        className="min-h-12 flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-950 transition outline-none focus:border-violet-500 focus:bg-white focus:ring-4 focus:ring-violet-500/10"
+                        disabled={chatBusy}
+                        id="chat-message"
+                        onChange={(event) => setChatDraft(event.target.value)}
+                        placeholder="输入你想调整的内容"
+                        rows={1}
+                        value={chatDraft}
+                      />
+                      <button
+                        className={primaryButtonClassName}
+                        disabled={chatBusy || !chatDraft.trim()}
+                        type="submit"
+                      >
+                        发送
+                      </button>
+                    </form>
+                  </div>
+                </aside>
+              ) : null}
             </div>
           </section>
         ) : null}
@@ -2256,7 +2233,6 @@ function WorkspaceFrame({
   const navigation: Array<{ label: string; view: DashboardView }> = [
     { label: "概览", view: "overview" },
     { label: "任务", view: "tasks" },
-    { label: "AI 助手", view: "assistant" },
     { label: "安排", view: "schedule" },
   ];
 
@@ -2390,30 +2366,6 @@ function WorkspaceIcon({ view }: { view: DashboardView }) {
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth="1.8"
-        />
-      </svg>
-    );
-  }
-  if (view === "assistant") {
-    return (
-      <svg
-        aria-hidden="true"
-        className="size-5"
-        fill="none"
-        viewBox="0 0 24 24"
-      >
-        <path
-          d="M5 18.5 3.5 21v-5A8 8 0 1 1 7 19h-2Z"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.8"
-        />
-        <path
-          d="M8 11h.01M12 11h.01M16 11h.01"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeWidth="2.2"
         />
       </svg>
     );

@@ -10,7 +10,9 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(
     page.getByRole("heading", { name: "开始新的作业计划" }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "AI 助手" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { exact: true, name: "任务" }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "创建第一份作业" }),
   ).toBeVisible();
@@ -57,14 +59,19 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await page.getByRole("button", { exact: true, name: "延期" }).click();
   await expect(page.getByText("任务已延至明天，后续安排已重排")).toBeVisible();
 
-  await page.getByRole("button", { exact: true, name: "AI 助手" }).click();
+  await page.getByRole("button", { exact: true, name: "任务" }).click();
+  const assistantPanel = page.getByRole("complementary", {
+    name: "AI 对话调整",
+  });
+  await expect(assistantPanel).toBeVisible();
+  await page.getByRole("button", { name: "隐藏 AI" }).click();
+  await expect(assistantPanel).toBeHidden();
+  await page.getByRole("button", { name: "显示 AI" }).click();
+  await expect(assistantPanel).toBeVisible();
   await expect(page.getByRole("heading", { name: "PacePal" })).toBeVisible();
   await page.getByRole("button", { name: "我每天只有 30 分钟" }).click();
   await expect(
     page.getByText("已把每天可用时间调整为 30 分钟，并重排后续任务。"),
-  ).toBeVisible();
-  await expect(
-    page.getByText("30 分钟", { exact: true }).first(),
   ).toBeVisible();
   await page.getByLabel("给 AI 助手的消息").fill("我已经完成了理解作业要求");
   await page.getByRole("button", { name: "发送" }).click();
