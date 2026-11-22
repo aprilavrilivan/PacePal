@@ -97,11 +97,14 @@ jobs:
               -H 'Content-Type: application/json' \
               --data "$refine_request" \
               https://pace-pal-eta.vercel.app/api/refine || true)"
-            jq '{fallback, fallbackReason, model, assistantMessage, dailyMinutes: .availability.dailyMinutes}' <<<"$refinement" || true
+            jq '{fallback, fallbackReason, model, assistantMessage, operations}' <<<"$refinement" || true
             if jq -e '
               .fallback == false and
               .model == "nvidia/nemotron-3.5-lightning-free" and
-              .availability.dailyMinutes == 45 and
+              (.operations | any(
+                .type == "set_availability" and
+                .availability.dailyMinutes == 45
+              )) and
               (.assistantMessage | length > 0)
             ' <<<"$refinement" >/dev/null; then
               exit 0
