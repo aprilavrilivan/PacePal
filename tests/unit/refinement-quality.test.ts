@@ -191,4 +191,25 @@ describe("gateway refinement quality checks", () => {
 
     expect(refinementQualityIssues(parsed, output, assignment)).toEqual([]);
   });
+
+  it("rejects operations that look valid but cannot change the saved plan", () => {
+    const parsed = decision({
+      intents: ["progress_update"],
+      operations: [
+        { type: "set_status", taskId: "missing-task", status: "completed" },
+        { type: "reschedule" },
+      ],
+    });
+    const output = {
+      assistantMessage: `${parsed.understanding}\n\n${parsed.changeSummary}`,
+      changed: true,
+      operations: parsed.operations,
+    };
+
+    expect(refinementQualityIssues(parsed, output, assignment)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("do not change the saved plan"),
+      ]),
+    );
+  });
 });

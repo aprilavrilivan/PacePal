@@ -234,4 +234,41 @@ describe("gateway refinement normalization", () => {
       { type: "reschedule" },
     ]);
   });
+
+  it("removes invented dependency ids before applying an AI task change", () => {
+    const output = normalizeGatewayRefinement(
+      {
+        assistantMessage:
+          "我理解你要增加一次复核。\n\n我已新增复核步骤，并放在研究之后。",
+        changeSummary: "我已新增复核步骤，并放在研究之后。",
+        needsClarification: false,
+        operations: [
+          {
+            afterTaskId: "research",
+            task: {
+              completionCriteria: "结论经过核对",
+              dependencies: ["research", "invented-task-id"],
+              description: "核对研究结论",
+              difficulty: "low",
+              estimatedMinutes: 20,
+              id: "review",
+              title: "复核结论",
+            },
+            type: "add_task",
+          },
+        ],
+        understanding: "我理解你要增加一次复核。",
+      },
+      assignment,
+    );
+
+    expect(output.operations).toContainEqual({
+      afterTaskId: "research",
+      task: expect.objectContaining({
+        dependencies: ["research"],
+        id: "review",
+      }),
+      type: "add_task",
+    });
+  });
 });

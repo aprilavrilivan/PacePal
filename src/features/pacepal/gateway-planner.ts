@@ -24,19 +24,19 @@ export const gatewayModel = "google/gemini-3.8-flash";
 export const gatewayModelProfiles = [
   { id: gatewayModel, reasoning: "high" as const, timeoutMs: 14_000 },
   {
-    id: "nvidia/nemotron-3.5-lightning-free",
+    id: "recursive/flint-v1.0",
     reasoning: "none" as const,
-    timeoutMs: 9_000,
+    timeoutMs: 10_000,
   },
   {
-    id: "recursive/flint-v1.0",
-    reasoning: "medium" as const,
-    timeoutMs: 9_000,
+    id: "nvidia/nemotron-3.5-lightning-free",
+    reasoning: "none" as const,
+    timeoutMs: 10_000,
   },
   {
     id: "reflection/beam-free",
-    reasoning: "medium" as const,
-    timeoutMs: 9_000,
+    reasoning: "low" as const,
+    timeoutMs: 8_000,
   },
 ] as const;
 

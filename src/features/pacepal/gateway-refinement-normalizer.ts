@@ -367,6 +367,83 @@ function operationsFromLegacyPlan(value: unknown, assignment: Assignment) {
   return operations;
 }
 
+function sanitizeOperationReferences(
+  operations: RefinementOperation[],
+  assignment: Assignment,
+) {
+  const existingIds = new Set(assignment.subtasks.map((task) => task.id));
+  const usedIds = new Set(existingIds);
+
+  const withUniqueAddedIds = operations.map((operation) => {
+    if (operation.type !== "add_task") return operation;
+
+    const baseId = operation.task.id || "ai-task";
+    let id = baseId;
+    let suffix = 2;
+    while (usedIds.has(id)) {
+      id = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+    usedIds.add(id);
+    return {
+      ...operation,
+      task: { ...operation.task, id },
+    };
+  });
+
+  const knownIds = new Set(usedIds);
+  return withUniqueAddedIds.map((operation) => {
+    if (operation.type === "add_task") {
+      return {
+        ...operation,
+        afterTaskId:
+          operation.afterTaskId && knownIds.has(operation.afterTaskId)
+            ? operation.afterTaskId
+            : null,
+        task: {
+          ...operation.task,
+          dependencies: operation.task.dependencies.filter(
+            (dependency, index, all) =>
+              dependency !== operation.task.id &&
+              knownIds.has(dependency) &&
+              all.indexOf(dependency) === index,
+          ),
+        },
+      };
+    }
+
+    if (
+      operation.type === "update_task" &&
+      operation.patch.dependencies !== undefined
+    ) {
+      return {
+        ...operation,
+        patch: {
+          ...operation.patch,
+          dependencies: operation.patch.dependencies.filter(
+            (dependency, index, all) =>
+              dependency !== operation.taskId &&
+              knownIds.has(dependency) &&
+              all.indexOf(dependency) === index,
+          ),
+        },
+      };
+    }
+
+    if (operation.type === "reorder_tasks") {
+      return {
+        ...operation,
+        taskIds: operation.taskIds.filter(
+          (taskId, index, all) =>
+            knownIds.has(taskId) && all.indexOf(taskId) === index,
+        ),
+      };
+    }
+
+    return operation;
+  });
+}
+
 export function normalizeGatewayRefinement(
   value: unknown,
   assignment: Assignment,
@@ -452,14 +529,19 @@ export function normalizeGatewayRefinement(
     }
   }
 
+  const sanitizedOperations = sanitizeOperationReferences(
+    operations,
+    assignment,
+  );
+
   if (
-    operations.some((operation) => operation.type !== "reschedule") &&
-    !operations.some((operation) => operation.type === "reschedule")
+    sanitizedOperations.some((operation) => operation.type !== "reschedule") &&
+    !sanitizedOperations.some((operation) => operation.type === "reschedule")
   ) {
-    operations.push({ type: "reschedule" });
+    sanitizedOperations.push({ type: "reschedule" });
   }
 
-  const deduplicated = operations
+  const deduplicated = sanitizedOperations
     .filter(
       (operation, index, all) =>
         all.findIndex(

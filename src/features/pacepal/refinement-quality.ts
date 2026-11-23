@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { Assignment } from "@/features/pacepal/model";
 import {
+  applyRefinement,
   refinementOperationSchema,
   type RefinementOutput,
 } from "@/features/pacepal/refinement";
@@ -302,6 +303,23 @@ export function refinementQualityIssues(
 
   if (output.changed && decision.changeSummary.length < 12) {
     issues.push("The change summary is too short to explain what changed.");
+  }
+
+  if (mutations.length > 0) {
+    const applied = applyRefinement(assignment, output);
+    const before = JSON.stringify({
+      availability: assignment.availability,
+      subtasks: assignment.subtasks,
+    });
+    const after = JSON.stringify({
+      availability: applied.availability,
+      subtasks: applied.subtasks,
+    });
+    if (before === after) {
+      issues.push(
+        "The proposed task mutations do not change the saved plan after validation.",
+      );
+    }
   }
 
   return issues;

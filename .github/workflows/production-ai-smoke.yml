@@ -126,6 +126,9 @@ jobs:
       - name: Probe dynamic replanning behavior
         shell: bash
         run: |
+          # The free providers enforce short-window quotas. This pause models a
+          # real chat interval after the initial plan/refinement interaction.
+          sleep 30
           deadline="$(date -u -d '+21 days' '+%Y-%m-%dT18:00:00.000Z')"
           assignment="$(jq -n --arg deadline "$deadline" '
             def task($id; $title; $minutes; $dependencies; $status): {
@@ -171,12 +174,18 @@ jobs:
             local name="$1"
             local message="$2"
             local response
-            response="$(jq -n --argjson assignment "$assignment" --arg message "$message" \
-              '{assignment: $assignment, message: $message}' | \
-              curl -fsS --max-time 90 \
-                -H 'Content-Type: application/json' \
-                --data-binary @- \
-                https://pace-pal-eta.vercel.app/api/refine)"
+            for attempt in 1 2; do
+              response="$(jq -n --argjson assignment "$assignment" --arg message "$message" \
+                '{assignment: $assignment, message: $message}' | \
+                curl -fsS --max-time 90 \
+                  -H 'Content-Type: application/json' \
+                  --data-binary @- \
+                  https://pace-pal-eta.vercel.app/api/refine)"
+              if jq -e '.fallback == false' <<<"$response" >/dev/null; then
+                break
+              fi
+              sleep 20
+            done
             echo "### $name" >> "$GITHUB_STEP_SUMMARY"
             jq -r '"- fallback: `\(.fallback)`\n- assistant: \(.assistantMessage)\n- operations: `\(.operations | map(.type) | join(", "))`"' \
               <<<"$response" >> "$GITHUB_STEP_SUMMARY"
@@ -186,15 +195,15 @@ jobs:
           vague="$(probe \
             '原计划合理时的模糊请求' \
             '重新平衡后续任务')"
-          sleep 8
+          sleep 20
           explicit="$(probe \
             '明确要求改变顺序' \
             '我已经有足够资料可以开始构思。请先写论文大纲，再补充核实史料，然后写初稿，并据此真正调整任务顺序和依赖关系。')"
-          sleep 8
+          sleep 20
           blocked="$(probe \
             '关键任务受阻后的主动调整' \
             '查找基础史料卡住了，明天才能拿到档案。今天有 120 分钟，请先安排不依赖档案、现在就能推进的工作。')"
-          sleep 8
+          sleep 20
           remaining="$(probe \
             '混合语言的实际剩余范围' \
             '我已经完成选题、sources、outline 和 first draft。现在只剩 polish / format check 和 final submission review，其他都做完了，请按实际进度调整。')"
