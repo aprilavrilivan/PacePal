@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Assignment } from "@/features/pacepal/model";
 import {
+  coerceGatewayRefinementContext,
   gatewayRefinementDecisionSchema,
   refinementQualityIssues,
 } from "@/features/pacepal/refinement-quality";
@@ -76,6 +77,31 @@ function decision(value: Record<string, unknown>) {
 }
 
 describe("gateway refinement quality checks", () => {
+  it("recovers flexible model metadata and broad task intent wording", () => {
+    const context = coerceGatewayRefinementContext(
+      {
+        actions: [{ action: "complete_task", task_id: "literature" }],
+        assistant_message: "我理解你的最新进度，并更新了相关任务。",
+        intent: ["progress", "replan"],
+        interpretation: "文献部分已经完成，需要继续推进实验。",
+      },
+      "文献已经做完了，实验卡住，先把写作提前，再重新安排一下",
+      assignment.title,
+    );
+
+    expect(context.intents).toEqual(
+      expect.arrayContaining([
+        "progress_update",
+        "blocker",
+        "reorder",
+        "schedule",
+      ]),
+    );
+    expect(context.planChangeRequested).toBe(true);
+    expect(context.understanding).toContain("文献部分已经完成");
+    expect(context.changeSummary).toContain("更新了相关任务");
+  });
+
   it("rejects a remaining-scope update that merely reschedules", () => {
     const parsed = decision({
       intents: ["remaining_scope"],

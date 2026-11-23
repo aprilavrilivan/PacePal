@@ -169,6 +169,34 @@ function taskPatch(value: unknown, current: Subtask) {
   return patch;
 }
 
+function referencedTask(
+  assignment: Assignment,
+  reference: string,
+  includeCompleted = false,
+) {
+  const candidates = assignment.subtasks.filter(
+    (task) => includeCompleted || task.status !== "completed",
+  );
+  const normalized = reference.trim().toLocaleLowerCase();
+  const exact = candidates.find(
+    (task) =>
+      task.id.toLocaleLowerCase() === normalized ||
+      task.title.toLocaleLowerCase() === normalized,
+  );
+  if (exact) return exact;
+
+  const partial = candidates.find((task) => {
+    const title = task.title.toLocaleLowerCase();
+    return (
+      normalized.length >= 3 &&
+      (title.includes(normalized) || normalized.includes(title))
+    );
+  });
+  if (partial) return partial;
+
+  return reference ? findReferencedTask(assignment, reference) : null;
+}
+
 function directOperation(
   value: unknown,
   assignment: Assignment,
@@ -177,14 +205,21 @@ function directOperation(
   const rawType = stringFor(source, ["type", "operation", "action"])
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
-  const taskId = stringFor(source, ["taskId", "task_id", "id"]);
+  const taskReference = stringFor(source, [
+    "taskId",
+    "task_id",
+    "id",
+    "taskTitle",
+    "task_title",
+    "target",
+  ]);
 
   if (/reopen|重新打开|撤销完成/.test(rawType)) {
     const status =
       statusFor(valueFor(source, ["status", "value", "newStatus"])) ?? "todo";
-    const current = assignment.subtasks.find((task) => task.id === taskId);
+    const current = referencedTask(assignment, taskReference, true);
     return current && current.status === "completed" && status !== "completed"
-      ? { type: "reopen_task", taskId, status }
+      ? { type: "reopen_task", taskId: current.id, status }
       : null;
   }
 
@@ -192,17 +227,17 @@ function directOperation(
     const status = statusFor(
       valueFor(source, ["status", "value", "newStatus"]) || rawType,
     );
-    const current = assignment.subtasks.find((task) => task.id === taskId);
+    const current = referencedTask(assignment, taskReference);
     return current &&
       status &&
       current.status !== "completed" &&
       current.status !== status
-      ? { type: "set_status", taskId, status }
+      ? { type: "set_status", taskId: current.id, status }
       : null;
   }
 
-  if (/update|modify|edit/.test(rawType) && taskId) {
-    const current = assignment.subtasks.find((task) => task.id === taskId);
+  if (/update|modify|edit/.test(rawType) && taskReference) {
+    const current = referencedTask(assignment, taskReference);
     if (!current || current.status === "completed") return null;
     const patch = taskPatch(
       valueFor(source, ["patch", "changes", "task"]) ?? source,
@@ -211,7 +246,7 @@ function directOperation(
     return Object.keys(patch).length > 0
       ? {
           type: "update_task",
-          taskId,
+          taskId: current.id,
           patch: patch as Extract<
             RefinementOperation,
             { type: "update_task" }
@@ -227,10 +262,10 @@ function directOperation(
     return { type: "add_task", afterTaskId, task };
   }
 
-  if (/remove|delete/.test(rawType) && taskId) {
-    const current = assignment.subtasks.find((task) => task.id === taskId);
+  if (/remove|delete/.test(rawType) && taskReference) {
+    const current = referencedTask(assignment, taskReference);
     return current && current.status !== "completed"
-      ? { type: "remove_task", taskId }
+      ? { type: "remove_task", taskId: current.id }
       : null;
   }
 
@@ -242,7 +277,11 @@ function directOperation(
       .map((task) => task.id);
     const validIds = new Set(currentOrder);
     const requested = taskIds
-      .map(String)
+      .map(
+        (reference) =>
+          referencedTask(assignment, String(reference))?.id ??
+          String(reference),
+      )
       .filter(
         (id, index, all) => validIds.has(id) && all.indexOf(id) === index,
       );

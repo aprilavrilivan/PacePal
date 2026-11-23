@@ -15,7 +15,7 @@ import { recommendNextTask } from "@/features/pacepal/execution";
 import type { Assignment } from "@/features/pacepal/model";
 import type { RefinementOutput } from "@/features/pacepal/refinement";
 import {
-  gatewayRefinementDecisionSchema,
+  coerceGatewayRefinementContext,
   refinementQualityIssues,
 } from "@/features/pacepal/refinement-quality";
 
@@ -160,12 +160,25 @@ export async function generateGatewayRefinement(
           system:
             "You are PacePal, a diligent task-planning partner for any kind of project. Understand real progress, reconcile it with the saved task state, make concrete plan changes, and clearly explain your understanding and actions while preserving user control.",
         });
-        const output = gatewayRefinementDecisionSchema.parse(rawOutput);
+        const output = coerceGatewayRefinementContext(
+          rawOutput,
+          message,
+          assignment.title,
+        );
+        const rawSource =
+          rawOutput &&
+          typeof rawOutput === "object" &&
+          !Array.isArray(rawOutput)
+            ? (rawOutput as Record<string, unknown>)
+            : {};
 
         const normalized = normalizeGatewayRefinement(
           {
-            ...output,
+            ...rawSource,
             assistantMessage: conversationalMessage(output),
+            changeSummary: output.changeSummary,
+            needsClarification: output.needsClarification,
+            understanding: output.understanding,
           },
           assignment,
           message,

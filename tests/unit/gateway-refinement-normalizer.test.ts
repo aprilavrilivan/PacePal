@@ -89,6 +89,25 @@ describe("gateway refinement normalization", () => {
     });
   });
 
+  it("matches operation targets by task title when a model does not preserve ids", () => {
+    const output = normalizeGatewayRefinement(
+      {
+        actions: [
+          {
+            action: "complete task",
+            target: "Research",
+          },
+        ],
+      },
+      assignment,
+    );
+
+    expect(output.operations).toEqual([
+      { status: "completed", taskId: "research", type: "set_status" },
+      { type: "reschedule" },
+    ]);
+  });
+
   it("turns a blocker into an actual task state change when the model only reschedules", () => {
     const output = normalizeGatewayRefinement(
       {
