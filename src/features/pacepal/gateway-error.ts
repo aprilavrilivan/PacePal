@@ -2,7 +2,7 @@ const failurePatterns = [
   ["authentication", /auth|credential|oidc|token|api[ _-]?key/i],
   ["quota", /credit|quota|billing|payment|insufficient|rate[ _-]?limit/i],
   ["timeout", /abort|timeout|timed out/i],
-  ["invalid-output", /output|schema|parse|json|validation/i],
+  ["invalid-output", /output|schema|parse|json|validation|zod/i],
   ["unavailable", /unavailable|overload|capacity|provider/i],
 ] as const;
 

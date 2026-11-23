@@ -9,6 +9,7 @@ describe("classifyGatewayFailure", () => {
     ["Insufficient credits", "quota"],
     ["Request timed out", "timeout"],
     ["Output schema validation failed", "invalid-output"],
+    ["ZodError invalid task operation", "invalid-output"],
     ["Provider is unavailable", "unavailable"],
     ["Unexpected failure", "gateway-error"],
   ])("classifies %s", (message, expected) => {
