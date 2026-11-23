@@ -9,6 +9,7 @@ import {
 } from "ai";
 
 import { normalizeGatewayPlan } from "@/features/pacepal/gateway-plan-normalizer";
+import { extractGatewayJson } from "@/features/pacepal/gateway-json";
 import {
   assignmentInputSchema,
   type AssignmentInput,
@@ -18,24 +19,23 @@ import { buildSubtasks } from "@/features/pacepal/plan-api";
 
 export const gatewayModel = "google/gemini-3.8-flash";
 export const gatewayModelProfiles = [
-  { id: gatewayModel, reasoning: "high" as const },
+  { id: gatewayModel, reasoning: "high" as const, timeoutMs: 14_000 },
+  {
+    id: "reflection/beam-free",
+    reasoning: "medium" as const,
+    timeoutMs: 14_000,
+  },
   {
     id: "nvidia/nemotron-3.5-lightning-free",
     reasoning: "none" as const,
+    timeoutMs: 14_000,
   },
 ] as const;
 
 function gatewayLanguageModel(modelId: string) {
   return wrapLanguageModel({
     middleware: extractJsonMiddleware({
-      transform(text) {
-        const objectStart = text.indexOf("{");
-        const objectEnd = text.lastIndexOf("}");
-
-        return objectStart >= 0 && objectEnd > objectStart
-          ? text.slice(objectStart, objectEnd + 1)
-          : text;
-      },
+      transform: extractGatewayJson,
     }),
     model: gateway(modelId),
   });
@@ -65,12 +65,17 @@ export async function generateGatewayPlan(
   input: AssignmentInput,
 ): Promise<{ model: string; subtasks: Subtask[] }> {
   const assignment = assignmentInputSchema.parse(input);
+  const deadline = Date.now() + 43_000;
   let lastError: unknown;
 
   for (const profile of gatewayModelProfiles) {
+    const remainingTime = deadline - Date.now();
+    if (remainingTime < 3_000) break;
     try {
       const { output } = await generateText({
-        abortSignal: AbortSignal.timeout(24_000),
+        abortSignal: AbortSignal.timeout(
+          Math.min(profile.timeoutMs, remainingTime - 1_000),
+        ),
         maxOutputTokens: 4096,
         model: gatewayLanguageModel(profile.id),
         output: Output.json({

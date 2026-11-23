@@ -66,6 +66,7 @@ jobs:
             if ! jq -e '
               .fallback == false and
               (.model == "google/gemini-3.8-flash" or
+                .model == "reflection/beam-free" or
                 .model == "nvidia/nemotron-3.5-lightning-free") and
               (.subtasks | length >= 4)
             ' <<<"$response" >/dev/null; then
@@ -104,6 +105,7 @@ jobs:
             if jq -e '
               .fallback == false and
               (.model == "google/gemini-3.8-flash" or
+                .model == "reflection/beam-free" or
                 .model == "nvidia/nemotron-3.5-lightning-free") and
               (.operations | any(
                 .type == "add_task" or
