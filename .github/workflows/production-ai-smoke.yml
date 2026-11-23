@@ -65,7 +65,8 @@ jobs:
             jq '{fallback, fallbackReason, model, subtaskCount: (.subtasks | length)}' <<<"$response" || true
             if ! jq -e '
               .fallback == false and
-              .model == "google/gemini-3.8-flash" and
+              (.model == "google/gemini-3.8-flash" or
+                .model == "nvidia/nemotron-3.5-lightning-free") and
               (.subtasks | length >= 4)
             ' <<<"$response" >/dev/null; then
               sleep 10
@@ -102,7 +103,8 @@ jobs:
             jq '{fallback, fallbackReason, model, assistantMessage, operations}' <<<"$refinement" || true
             if jq -e '
               .fallback == false and
-              .model == "google/gemini-3.8-flash" and
+              (.model == "google/gemini-3.8-flash" or
+                .model == "nvidia/nemotron-3.5-lightning-free") and
               (.operations | any(
                 .type == "add_task" or
                 .type == "update_task" or

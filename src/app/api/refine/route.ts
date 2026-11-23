@@ -42,11 +42,12 @@ export async function POST(request: Request) {
     }
 
     try {
+      const refinement = await generateGatewayRefinement(assignment, message);
       return Response.json({
-        ...(await generateGatewayRefinement(assignment, message)),
+        ...refinement.output,
         fallback: false,
         fallbackReason: null,
-        model: gatewayModel,
+        model: refinement.model,
       });
     } catch (error) {
       console.error("AI Gateway refinement failed", error);

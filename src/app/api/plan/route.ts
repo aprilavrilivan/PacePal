@@ -25,10 +25,11 @@ export async function POST(request: Request) {
     }
 
     try {
+      const plan = await generateGatewayPlan(input);
       return Response.json({
         fallback: false,
-        model: gatewayModel,
-        subtasks: await generateGatewayPlan(input),
+        model: plan.model,
+        subtasks: plan.subtasks,
       });
     } catch (error) {
       console.error("AI Gateway plan generation failed", error);
