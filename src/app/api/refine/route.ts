@@ -41,22 +41,13 @@ export async function POST(request: Request) {
       });
     }
 
-    let gatewayError: unknown;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        return Response.json({
-          ...(await generateGatewayRefinement(assignment, message)),
-          fallback: false,
-          fallbackReason: null,
-          model: gatewayModel,
-        });
-      } catch (error) {
-        gatewayError = error;
-      }
-    }
-
     try {
-      throw gatewayError;
+      return Response.json({
+        ...(await generateGatewayRefinement(assignment, message)),
+        fallback: false,
+        fallbackReason: null,
+        model: gatewayModel,
+      });
     } catch (error) {
       console.error("AI Gateway refinement failed", error);
       return Response.json(

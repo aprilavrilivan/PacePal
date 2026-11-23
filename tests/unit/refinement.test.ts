@@ -156,4 +156,23 @@ describe("plan refinement", () => {
       title: "Research",
     });
   });
+
+  it("reopens completed work only through an explicit reopen operation", () => {
+    const completedAssignment: Assignment = {
+      ...assignment,
+      subtasks: [{ ...assignment.subtasks[0], status: "completed" }],
+    };
+    const refined = applyRefinement(completedAssignment, {
+      assistantMessage: "Reopened after an explicit correction",
+      changed: true,
+      operations: [
+        { status: "in_progress", taskId: "research", type: "reopen_task" },
+      ],
+    });
+
+    expect(refined.subtasks[0]).toMatchObject({
+      status: "in_progress",
+      title: "Research",
+    });
+  });
 });

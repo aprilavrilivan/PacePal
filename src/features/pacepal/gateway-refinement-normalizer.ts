@@ -179,6 +179,15 @@ function directOperation(
     .replace(/[\s-]+/g, "_");
   const taskId = stringFor(source, ["taskId", "task_id", "id"]);
 
+  if (/reopen|重新打开|撤销完成/.test(rawType)) {
+    const status =
+      statusFor(valueFor(source, ["status", "value", "newStatus"])) ?? "todo";
+    const current = assignment.subtasks.find((task) => task.id === taskId);
+    return current && current.status === "completed" && status !== "completed"
+      ? { type: "reopen_task", taskId, status }
+      : null;
+  }
+
   if (/complete|status|progress|reopen|block|pause|postpone/.test(rawType)) {
     const status = statusFor(
       valueFor(source, ["status", "value", "newStatus"]) || rawType,
@@ -419,7 +428,7 @@ export function normalizeGatewayRefinement(
             JSON.stringify(candidate) === JSON.stringify(operation),
         ) === index,
     )
-    .slice(0, 24);
+    .slice(0, 64);
   const changed = deduplicated.length > 0;
 
   const taskById = new Map(
@@ -450,16 +459,22 @@ export function normalizeGatewayRefinement(
     "response",
     "summary",
   ]);
-  if (blocked?.type === "set_status") {
-    verifiedMessage = `已将“${taskById.get(blocked.taskId) ?? "相关任务"}”标记为卡住，并重新安排其他可执行任务。`;
-  } else if (reordered && dependenciesChanged) {
-    verifiedMessage = "已调整任务顺序和依赖关系，并重新计算后续日程。";
-  } else if (reordered) {
-    verifiedMessage = "已调整任务顺序，并重新计算后续日程。";
-  } else if (availabilityChanged) {
-    verifiedMessage = "已更新可用时间，并重新计算后续日程。";
-  } else if (onlyRescheduled) {
-    verifiedMessage = "已重新计算后续日程，任务内容和顺序保持不变。";
+  const hasGroundedNarrative =
+    stringFor(source, ["understanding"]).length > 0 &&
+    (stringFor(source, ["changeSummary", "change_summary"]).length > 0 ||
+      Boolean(valueFor(source, ["needsClarification", "needs_clarification"])));
+  if (!hasGroundedNarrative) {
+    if (blocked?.type === "set_status") {
+      verifiedMessage = `已将“${taskById.get(blocked.taskId) ?? "相关任务"}”标记为卡住，并重新安排其他可执行任务。`;
+    } else if (reordered && dependenciesChanged) {
+      verifiedMessage = "已调整任务顺序和依赖关系，并重新计算后续日程。";
+    } else if (reordered) {
+      verifiedMessage = "已调整任务顺序，并重新计算后续日程。";
+    } else if (availabilityChanged) {
+      verifiedMessage = "已更新可用时间，并重新计算后续日程。";
+    } else if (onlyRescheduled) {
+      verifiedMessage = "已重新计算后续日程，任务内容和顺序保持不变。";
+    }
   }
 
   return refinementOutputSchema.parse({

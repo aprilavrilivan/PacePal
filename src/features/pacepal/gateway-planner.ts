@@ -16,7 +16,7 @@ import {
 } from "@/features/pacepal/model";
 import { buildSubtasks } from "@/features/pacepal/plan-api";
 
-export const gatewayModel = "nvidia/nemotron-3.5-lightning-free";
+export const gatewayModel = "google/gemini-3.8-flash";
 
 const gatewayLanguageModel = wrapLanguageModel({
   middleware: extractJsonMiddleware({
@@ -66,7 +66,7 @@ export async function generateGatewayPlan(
       name: "assignment_plan",
     }),
     prompt: buildPrompt(assignment),
-    reasoning: "none",
+    reasoning: "high",
     system:
       "You are PacePal, a concise academic planning assistant. Keep student control and academic integrity central.",
   });

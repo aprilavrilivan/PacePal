@@ -169,4 +169,50 @@ describe("gateway refinement normalization", () => {
       "已重新计算后续日程，任务内容和顺序保持不变。",
     );
   });
+
+  it("preserves a grounded conversational explanation from the planner", () => {
+    const output = normalizeGatewayRefinement(
+      {
+        assistantMessage:
+          "我理解为研究部分已经完成，目前只剩写作。\n\n我已把研究标记为完成，并把写作提前。",
+        changeSummary: "我已把研究标记为完成，并把写作提前。",
+        needsClarification: false,
+        operations: [
+          { type: "set_status", taskId: "research", status: "completed" },
+          { type: "reschedule" },
+        ],
+        understanding: "我理解为研究部分已经完成，目前只剩写作。",
+      },
+      assignment,
+    );
+
+    expect(output.assistantMessage).toContain("我理解为研究部分已经完成");
+    expect(output.assistantMessage).toContain("我已把研究标记为完成");
+  });
+
+  it("accepts an explicit operation that reopens a mistakenly completed task", () => {
+    const completedAssignment: Assignment = {
+      ...assignment,
+      subtasks: [{ ...assignment.subtasks[0], status: "completed" }],
+    };
+    const output = normalizeGatewayRefinement(
+      {
+        assistantMessage:
+          "我理解为研究其实还没完成。\n\n我已把它恢复为待开始。",
+        changeSummary: "我已把它恢复为待开始。",
+        needsClarification: false,
+        operations: [
+          { type: "reopen_task", taskId: "research", status: "todo" },
+        ],
+        understanding: "我理解为研究其实还没完成。",
+      },
+      completedAssignment,
+      "Research 其实还没完成，请撤销完成状态。",
+    );
+
+    expect(output.operations).toEqual([
+      { status: "todo", taskId: "research", type: "reopen_task" },
+      { type: "reschedule" },
+    ]);
+  });
 });

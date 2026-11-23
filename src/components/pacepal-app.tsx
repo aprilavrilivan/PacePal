@@ -2496,7 +2496,7 @@ export function PacePalApp() {
                         key={message.id}
                       >
                         <p
-                          className={`max-w-[88%] rounded-2xl px-4 py-3 leading-7 shadow-sm ${
+                          className={`max-w-[88%] rounded-2xl px-4 py-3 leading-7 whitespace-pre-wrap shadow-sm ${
                             message.role === "user"
                               ? "rounded-tr-md bg-[#5b55df] text-white"
                               : "rounded-tl-md border border-slate-200 bg-white text-slate-700"

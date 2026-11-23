@@ -32,6 +32,11 @@ export const refinementOperationSchema = z.discriminatedUnion("type", [
     status: subtaskStatusSchema,
   }),
   z.object({
+    type: z.literal("reopen_task"),
+    taskId: z.string().trim().min(1),
+    status: z.enum(["todo", "in_progress", "paused", "postponed", "blocked"]),
+  }),
+  z.object({
     type: z.literal("update_task"),
     taskId: z.string().trim().min(1),
     patch: taskPatchSchema,
@@ -59,7 +64,7 @@ export const refinementOperationSchema = z.discriminatedUnion("type", [
 export const refinementOutputSchema = z.object({
   assistantMessage: z.string().trim().min(1),
   changed: z.boolean(),
-  operations: z.array(refinementOperationSchema).max(24),
+  operations: z.array(refinementOperationSchema).max(64),
 });
 
 export const refinementRequestSchema = z.object({
@@ -155,6 +160,20 @@ export function applyRefinement(
                 operation.status === "in_progress" ? task.activeSince : null,
               postponedUntil:
                 operation.status === "postponed" ? task.postponedUntil : null,
+              status: operation.status,
+            }
+          : task,
+      );
+      continue;
+    }
+
+    if (operation.type === "reopen_task") {
+      subtasks = subtasks.map((task) =>
+        task.id === operation.taskId && task.status === "completed"
+          ? {
+              ...task,
+              activeSince: null,
+              postponedUntil: null,
               status: operation.status,
             }
           : task,
