@@ -8,19 +8,19 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await page.reload();
 
   await expect(
-    page.getByRole("heading", { name: "开始新的作业计划" }),
+    page.getByRole("heading", { name: "开始新的任务计划" }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { exact: true, name: "任务" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "创建第一份作业" }),
+    page.getByRole("heading", { name: "创建第一个任务" }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "创建作业" }).click();
-  await page.getByLabel("作业名称").fill("媒介研究课程论文");
+  await page.getByRole("button", { name: "创建任务" }).click();
+  await page.getByLabel("任务名称").fill("媒介研究课程论文");
   await page
-    .getByLabel("作业要求")
+    .getByLabel("任务要求")
     .fill("分析一个媒介现象，使用至少五个学术来源。");
   await page.getByLabel("成果形式").fill("2500 字课程论文");
 
@@ -32,20 +32,14 @@ test("creates, approves, schedules, and persists an assignment", async ({
   ).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`;
 
   await page.getByLabel("截止时间").fill(localDeadline);
+  await page.getByLabel("开始时间").fill("18:00");
   await page.getByRole("button", { name: "保存并生成任务" }).click();
 
   await expect(
     page.getByRole("heading", { name: "确认任务计划" }),
   ).toBeVisible();
-  await expect(page.getByText("理解作业要求")).toBeVisible();
+  await expect(page.getByText("理解任务要求")).toBeVisible();
   await page.getByRole("button", { name: "确认任务计划" }).click();
-
-  await expect(
-    page.getByRole("heading", { name: "安排学习时间" }),
-  ).toBeVisible();
-  await page.getByLabel("每天可用时间").selectOption("60");
-  await page.getByLabel("开始时间").fill("18:00");
-  await page.getByRole("button", { name: "生成安排" }).click();
 
   await expect(page.getByRole("heading", { name: "今日重点" })).toBeVisible();
   await expect(
@@ -92,9 +86,9 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await page.getByLabel("任务名称 2").press("Tab");
   const manualRows = page.locator('[data-testid^="manual-subtask-"]');
   await page
-    .getByRole("button", { name: "拖动 理解作业要求" })
+    .getByRole("button", { name: "拖动 理解任务要求" })
     .dragTo(manualRows.nth(2));
-  await expect(page.getByLabel("任务名称 3")).toHaveValue("理解作业要求");
+  await expect(page.getByLabel("任务名称 3")).toHaveValue("理解任务要求");
   await page.getByRole("button", { name: "添加子任务" }).click();
   await expect(page.getByLabel("任务名称 9")).toHaveValue("新子任务");
 
@@ -102,15 +96,11 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(assistantPanel).toBeVisible();
   await expect(page.getByText("资料检索与核实")).toBeVisible();
   await expect(page.getByRole("heading", { name: "PacePal" })).toBeVisible();
-  await page.getByRole("button", { name: "我每天只有 30 分钟" }).click();
-  await expect(
-    page.getByText("已把每天可用时间调整为 30 分钟，并重排后续任务。"),
-  ).toBeVisible();
-  await page.getByLabel("给 AI 助手的消息").fill("我已经完成了理解作业要求");
+  await page.getByLabel("给 AI 助手的消息").fill("我已经完成了理解任务要求");
   await page.getByRole("button", { name: "发送" }).click();
   await expect(
     page.getByText(
-      "已将“理解作业要求”标记为完成，并根据当前进度重排后续任务。",
+      "已将“理解任务要求”标记为完成，并根据当前进度重排后续任务。",
     ),
   ).toBeVisible();
 
@@ -120,7 +110,7 @@ test("creates, approves, schedules, and persists an assignment", async ({
 
   await page.reload();
   await expect(page.getByRole("heading", { name: "今日重点" })).toBeVisible();
-  await expect(page.getByText("1 个主任务", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "待完成任务" })).toBeVisible();
 });
 
 test("keeps multiple assignments and lets the user switch between them", async ({
@@ -132,25 +122,25 @@ test("keeps multiple assignments and lets the user switch between them", async (
 
   async function createAssignment(title: string, daysFromNow: number) {
     await page
-      .getByRole("button", { name: /创建作业|新建任务/ })
+      .getByRole("button", { name: /创建任务|新建任务/ })
       .first()
       .click();
-    await page.getByLabel("作业名称").fill(title);
-    await page.getByLabel("作业要求").fill("完成资料整理、初稿和复核。 ");
-    await page.getByLabel("成果形式").fill("课程作业");
+    await page.getByLabel("任务名称").fill(title);
+    await page.getByLabel("任务要求").fill("完成资料整理、初稿和复核。 ");
+    await page.getByLabel("成果形式").fill("课程报告");
     const deadline = new Date();
     deadline.setDate(deadline.getDate() + daysFromNow);
     const value = `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`;
     await page.getByLabel("截止时间").fill(value);
+    await page.getByLabel("开始时间").fill("18:00");
     await page.getByRole("button", { name: "保存并生成任务" }).click();
     await page.getByRole("button", { name: "确认任务计划" }).click();
-    await page.getByRole("button", { name: "生成安排" }).click();
   }
 
   await createAssignment("课程论文", 10);
   await createAssignment("项目汇报", 5);
 
-  await expect(page.getByText("2 个主任务", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "待完成任务" })).toBeVisible();
   await page.getByRole("button", { exact: true, name: "任务" }).click();
   await expect(page.getByRole("button", { name: /课程论文/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /项目汇报/ })).toBeVisible();

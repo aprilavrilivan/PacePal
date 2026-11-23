@@ -20,15 +20,9 @@ export function generateMockRefinement(
   const availableMatch = message.match(/(\d{1,3})\s*分钟/);
 
   if (availableMatch && /(每天|时间|可用|安排)/.test(message)) {
-    const dailyMinutes = Math.max(15, Math.min(240, Number(availableMatch[1])));
-    return {
-      assistantMessage: `已把每天可用时间调整为 ${dailyMinutes} 分钟，并重排后续任务。`,
-      changed: true,
-      operations: [
-        { type: "set_availability", availability: { dailyMinutes } },
-        { type: "reschedule" },
-      ],
-    };
+    return unchanged(
+      "不记录固定的每日可用时间。你可以在“今日重点”按当下可用时间和精力获取推荐。",
+    );
   }
 
   if (
@@ -104,8 +98,7 @@ export function generateMockRefinement(
 
   if (/(重新平衡|重新安排|重排|调整后续)/.test(message)) {
     return {
-      assistantMessage:
-        "已根据当前进度、截止时间和每日可用时间重新安排后续任务。",
+      assistantMessage: "已根据当前进度、截止时间和任务依赖重新安排后续任务。",
       changed: true,
       operations: [{ type: "reschedule" }],
     };

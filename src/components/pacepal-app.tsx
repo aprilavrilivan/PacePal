@@ -27,10 +27,7 @@ import {
   applyRefinement,
   requestRefinement,
 } from "@/features/pacepal/refinement";
-import {
-  buildSchedule,
-  calculateDeadlineRisk,
-} from "@/features/pacepal/scheduler";
+import { buildSchedule } from "@/features/pacepal/scheduler";
 import {
   clearAppState,
   clearAppStateOwner,
@@ -42,7 +39,7 @@ import {
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
-type Screen = "dashboard" | "create" | "plan" | "availability" | "account";
+type Screen = "dashboard" | "create" | "plan" | "account";
 type DashboardView = "overview" | "tasks" | "schedule";
 type TaskAdjustmentMode = "ai" | "manual" | null;
 type SyncStatus = "local" | "loading" | "saving" | "synced" | "error";
@@ -182,8 +179,8 @@ function rebuildAssignmentSchedule(
 function validateAssignment(form: AssignmentInput) {
   const errors: FormErrors = {};
 
-  if (!form.title.trim()) errors.title = "请输入作业名称";
-  if (!form.requirements.trim()) errors.requirements = "请输入作业要求";
+  if (!form.title.trim()) errors.title = "请输入任务名称";
+  if (!form.requirements.trim()) errors.requirements = "请输入任务要求";
   if (!form.deliverable.trim()) errors.deliverable = "请输入成果形式";
 
   if (!form.deadline) {
@@ -205,10 +202,10 @@ export function PacePalApp() {
   const [dashboardView, setDashboardView] = useState<DashboardView>("overview");
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [form, setForm] = useState<AssignmentInput>(emptyForm);
+  const [taskStartTime, setTaskStartTime] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [planError, setPlanError] = useState("");
-  const [planNotice, setPlanNotice] = useState("");
   const [planBusy, setPlanBusy] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [cloudReady, setCloudReady] = useState(false);
@@ -384,18 +381,6 @@ export function PacePalApp() {
     [assignment?.checkIn, assignments],
   );
 
-  const deadlineRisk = useMemo(
-    () =>
-      assignment
-        ? calculateDeadlineRisk(
-            assignment.subtasks,
-            assignment.deadline,
-            assignment.availability,
-          )
-        : null,
-    [assignment],
-  );
-
   const groupedSchedule = useMemo(() => {
     const grouped = new Map<string, ScheduleBlock[]>();
     if (!assignment) return [];
@@ -485,8 +470,8 @@ export function PacePalApp() {
   function openCreate() {
     setFormMode("create");
     setForm(emptyForm);
+    setTaskStartTime("");
     setErrors({});
-    setPlanNotice("");
     setScreen("create");
   }
 
@@ -500,6 +485,7 @@ export function PacePalApp() {
       deadline: assignment.deadline,
       priority: assignment.priority,
     });
+    setTaskStartTime(assignment.availability.preferredTime);
     setErrors({});
     setScreen("create");
   }
@@ -515,39 +501,43 @@ export function PacePalApp() {
         form.title !== assignment.title ||
         form.requirements !== assignment.requirements ||
         form.deliverable !== assignment.deliverable;
-      const candidate = { ...assignment, ...form };
+      const availability = {
+        ...assignment.availability,
+        preferredTime: taskStartTime,
+      };
+      const candidate = { ...assignment, ...form, availability };
       setPlanBusy(true);
 
       if (planningFieldsChanged) {
         try {
           const response = await requestRefinement(
             candidate,
-            "作业名称、要求或成果形式已经修改。请重新理解目标，只调整尚未完成的任务，保留已完成工作，并重新安排后续计划。",
+            "任务名称、要求或成果形式已经修改。请重新理解目标，只调整尚未完成的任务，保留已完成工作，并重新安排后续计划。",
           );
           updateAssignment((current) => {
-            const edited = { ...current, ...form };
+            const edited = { ...current, ...form, availability };
             const refined = response.changed
               ? applyRefinement(edited, response)
               : edited;
             return rebuildAssignmentSchedule(
               refined,
               response.changed
-                ? "作业信息与后续任务已更新"
-                : "作业信息已更新，安排已重算",
+                ? "任务信息与后续任务已更新"
+                : "任务信息已更新，安排已重算",
             );
           });
         } catch {
           updateAssignment((current) =>
             rebuildAssignmentSchedule(
-              { ...current, ...form },
-              "作业信息已更新；AI 暂时不可用，原任务已保留",
+              { ...current, ...form, availability },
+              "任务信息已更新；AI 暂时不可用，原任务已保留",
             ),
           );
         }
       } else {
         updateAssignment((current) =>
           rebuildAssignmentSchedule(
-            { ...current, ...form },
+            { ...current, ...form, availability },
             "截止时间或优先级已更新，安排已重算",
           ),
         );
@@ -559,18 +549,12 @@ export function PacePalApp() {
     }
 
     setPlanBusy(true);
-    setPlanNotice("");
-
     let subtasks: Subtask[];
     try {
       const plan = await requestPlan(form);
       subtasks = plan.subtasks;
-      if (plan.fallback) {
-        setPlanNotice("AI 暂时不可用，已生成基础计划");
-      }
     } catch {
       subtasks = generateMockPlan(form);
-      setPlanNotice("AI 暂时不可用，已生成基础计划");
     } finally {
       setPlanBusy(false);
     }
@@ -581,7 +565,7 @@ export function PacePalApp() {
       createdAt: new Date().toISOString(),
       status: "planning",
       subtasks,
-      availability: { dailyMinutes: 60, preferredTime: "18:00" },
+      availability: { dailyMinutes: 240, preferredTime: taskStartTime },
       schedule: [],
       unscheduledMinutes: 0,
       checkIn: { availableMinutes: 30, energy: "medium" },
@@ -757,13 +741,6 @@ export function PacePalApp() {
 
     setPlanError("");
     setEditingTaskId(null);
-    setScreen("availability");
-  }
-
-  function createSchedule(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!assignment) return;
-
     const result = buildSchedule(
       assignment.subtasks,
       assignment.deadline,
@@ -774,7 +751,7 @@ export function PacePalApp() {
       ...current,
       status: "scheduled",
       schedule: result.blocks,
-      scheduleNotice: "计划已生成",
+      scheduleNotice: "",
       unscheduledMinutes: result.unscheduledMinutes,
     }));
     setDashboardView("overview");
@@ -1119,7 +1096,7 @@ export function PacePalApp() {
   }
 
   function deleteAssignment() {
-    if (!window.confirm("删除当前作业计划？")) return;
+    if (!window.confirm("删除当前任务计划？")) return;
     if (!assignment) return;
     setAppState((current) => {
       const assignments = current.assignments.filter(
@@ -1281,14 +1258,14 @@ export function PacePalApp() {
             返回
           </button>
           <h1 className="mt-6 text-3xl font-semibold tracking-[-0.03em] text-slate-950">
-            {formMode === "create" ? "创建作业" : "编辑作业"}
+            {formMode === "create" ? "创建任务" : "编辑任务"}
           </h1>
 
           <form
             className={`${surfaceClassName} mt-8 space-y-6 p-5 sm:p-8`}
             onSubmit={handleAssignmentSubmit}
           >
-            <FormField label="作业名称" error={errors.title}>
+            <FormField label="任务名称" error={errors.title}>
               <input
                 className={fieldClassName}
                 id="title"
@@ -1302,7 +1279,7 @@ export function PacePalApp() {
               />
             </FormField>
 
-            <FormField label="作业要求" error={errors.requirements}>
+            <FormField label="任务要求" error={errors.requirements}>
               <textarea
                 className={`${fieldClassName} min-h-32 resize-y`}
                 id="requirements"
@@ -1331,7 +1308,7 @@ export function PacePalApp() {
               />
             </FormField>
 
-            <div className="grid gap-6 sm:grid-cols-2">
+            <div className="grid gap-6 sm:grid-cols-3">
               <FormField label="截止时间" error={errors.deadline}>
                 <input
                   className={fieldClassName}
@@ -1344,6 +1321,17 @@ export function PacePalApp() {
                       deadline: event.target.value,
                     }))
                   }
+                />
+              </FormField>
+
+              <FormField label="开始时间">
+                <input
+                  className={fieldClassName}
+                  id="startTime"
+                  onChange={(event) => setTaskStartTime(event.target.value)}
+                  required
+                  type="time"
+                  value={taskStartTime}
                 />
               </FormField>
 
@@ -1397,7 +1385,7 @@ export function PacePalApp() {
             onClick={openEditAssignment}
             type="button"
           >
-            编辑作业
+            编辑任务
           </button>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -1416,15 +1404,6 @@ export function PacePalApp() {
               添加任务
             </button>
           </div>
-
-          {planNotice ? (
-            <p
-              className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 font-medium text-amber-900"
-              role="status"
-            >
-              {planNotice}
-            </p>
-          ) : null}
 
           <ol
             className={`${surfaceClassName} mt-8 divide-y divide-slate-100 overflow-hidden px-5 sm:px-6`}
@@ -1515,76 +1494,6 @@ export function PacePalApp() {
     );
   }
 
-  if (screen === "availability" && assignment) {
-    return (
-      <AppFrame {...appFrameProps}>
-        <div className="mx-auto w-full max-w-xl py-10 sm:py-16">
-          <button
-            className={textButtonClassName}
-            onClick={() => setScreen("plan")}
-            type="button"
-          >
-            返回
-          </button>
-          <h1 className="mt-6 text-3xl font-semibold tracking-[-0.03em] text-slate-950">
-            安排学习时间
-          </h1>
-
-          <form
-            className={`${surfaceClassName} mt-8 space-y-6 p-5 sm:p-8`}
-            onSubmit={createSchedule}
-          >
-            <FormField label="每天可用时间">
-              <select
-                className={fieldClassName}
-                id="dailyMinutes"
-                value={assignment.availability.dailyMinutes}
-                onChange={(event) =>
-                  updateAssignment((current) => ({
-                    ...current,
-                    availability: {
-                      ...current.availability,
-                      dailyMinutes: Number(event.target.value),
-                    },
-                  }))
-                }
-              >
-                <option value={30}>30 分钟</option>
-                <option value={60}>60 分钟</option>
-                <option value={90}>90 分钟</option>
-                <option value={120}>120 分钟</option>
-              </select>
-            </FormField>
-
-            <FormField label="开始时间">
-              <input
-                className={fieldClassName}
-                id="preferredTime"
-                type="time"
-                value={assignment.availability.preferredTime}
-                onChange={(event) =>
-                  updateAssignment((current) => ({
-                    ...current,
-                    availability: {
-                      ...current.availability,
-                      preferredTime: event.target.value,
-                    },
-                  }))
-                }
-              />
-            </FormField>
-
-            <div className="flex justify-end pt-2">
-              <button className={primaryButtonClassName} type="submit">
-                生成安排
-              </button>
-            </div>
-          </form>
-        </div>
-      </AppFrame>
-    );
-  }
-
   if (!assignment) {
     return (
       <WorkspaceFrame
@@ -1600,7 +1509,7 @@ export function PacePalApp() {
               {greetingText()}
             </p>
             <h1 className="text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-[2.5rem]">
-              开始新的作业计划
+              开始新的任务计划
             </h1>
           </div>
 
@@ -1647,7 +1556,7 @@ export function PacePalApp() {
                 </div>
                 <div>
                   <h2 className="text-2xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-3xl">
-                    创建第一份作业
+                    创建第一个任务
                   </h2>
                   <div className="mt-6 flex flex-wrap gap-2">
                     {["任务拆解", "每日安排", "动态调整"].map((label) => (
@@ -1664,7 +1573,7 @@ export function PacePalApp() {
                     onClick={openCreate}
                     type="button"
                   >
-                    创建作业
+                    创建任务
                   </button>
                 </div>
               </div>
@@ -1722,10 +1631,6 @@ export function PacePalApp() {
           block.date >= currentDateKey(),
       ) ?? null)
     : null;
-  const riskMinutes = Math.max(
-    assignment.unscheduledMinutes,
-    deadlineRisk?.shortfallMinutes ?? 0,
-  );
   const remainingMinutes = assignment.subtasks
     .filter((task) => task.status !== "completed")
     .reduce((total, task) => total + task.estimatedMinutes, 0);
@@ -1742,9 +1647,6 @@ export function PacePalApp() {
     ({ block }) => block.date === currentDateKey(),
   );
   const allSubtasks = assignments.flatMap((item) => item.subtasks);
-  const allCompletedCount = allSubtasks.filter(
-    (task) => task.status === "completed",
-  ).length;
   const allRemainingMinutes = allSubtasks
     .filter((task) => task.status !== "completed")
     .reduce((total, task) => total + task.estimatedMinutes, 0);
@@ -1832,24 +1734,6 @@ export function PacePalApp() {
             <h1 className="text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-[2.5rem]">
               {viewTitles[dashboardView]}
             </h1>
-            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm font-medium text-slate-500">
-              {dashboardView === "overview" ? (
-                <>
-                  <span>{assignments.length} 个主任务</span>
-                  <span>
-                    {allSubtasks.length - allCompletedCount} 个子任务待完成
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span>{assignment.title}</span>
-                  <span>截止 {formatDate(assignment.deadline)}</span>
-                  <span>
-                    {completedCount} / {assignment.subtasks.length} 完成
-                  </span>
-                </>
-              )}
-            </div>
           </div>
           <div className="flex gap-2">
             {dashboardView !== "overview" ? (
@@ -1859,44 +1743,28 @@ export function PacePalApp() {
                   onClick={openEditAssignment}
                   type="button"
                 >
-                  编辑作业
+                  编辑任务
                 </button>
                 <button
                   className={textButtonClassName}
                   onClick={deleteAssignment}
                   type="button"
                 >
-                  删除作业
+                  删除任务
                 </button>
               </>
             ) : null}
-            <button
-              className={primaryButtonClassName}
-              onClick={openCreate}
-              type="button"
-            >
-              新建任务
-            </button>
+            {dashboardView !== "tasks" ? (
+              <button
+                className={primaryButtonClassName}
+                onClick={openCreate}
+                type="button"
+              >
+                新建任务
+              </button>
+            ) : null}
           </div>
         </div>
-
-        {assignment.scheduleNotice && dashboardView !== "overview" ? (
-          <p
-            className="mb-4 rounded-xl border border-violet-100 bg-violet-50 px-4 py-3 font-medium text-violet-950"
-            role="status"
-          >
-            {assignment.scheduleNotice}
-          </p>
-        ) : null}
-
-        {riskMinutes > 0 ? (
-          <p
-            className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-medium text-amber-950"
-            role="status"
-          >
-            截止前缺少 {riskMinutes} 分钟容量
-          </p>
-        ) : null}
 
         {dashboardView === "overview" ? (
           <section className="space-y-5">
@@ -2653,7 +2521,7 @@ export function PacePalApp() {
                     <div className="mb-3 flex flex-wrap gap-2">
                       {[
                         "把当前任务拆小",
-                        "我每天只有 30 分钟",
+                        "检查并校准任务耗时",
                         "依据进度和阻塞优化计划",
                       ].map((prompt) => (
                         <button

@@ -115,6 +115,7 @@ export function buildSchedule(
   let blockIndex = blocks.length;
   let unscheduledMinutes = 0;
   const blockedDependencies = new Set<string>();
+  const usedBlockIds = new Set(blocks.map((block) => block.id));
 
   for (const subtask of ordered) {
     let taskMinutes = Math.max(
@@ -160,9 +161,15 @@ export function buildSchedule(
       }
 
       const durationMinutes = Math.min(taskMinutes, availableToday);
+      let blockId = "";
+      do {
+        blockIndex += 1;
+        blockId = `block-${blockIndex}-${subtask.id}`;
+      } while (usedBlockIds.has(blockId));
+      usedBlockIds.add(blockId);
 
       blocks.push({
-        id: `block-${blockIndex + 1}-${subtask.id}`,
+        id: blockId,
         subtaskId: subtask.id,
         date: dateKey,
         startTime: addMinutes(availability.preferredTime, usedToday),
@@ -172,7 +179,6 @@ export function buildSchedule(
 
       taskMinutes -= durationMinutes;
       usedByDate.set(dateKey, usedToday + durationMinutes);
-      blockIndex += 1;
     }
   }
 

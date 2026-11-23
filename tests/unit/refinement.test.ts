@@ -37,12 +37,12 @@ const assignment: Assignment = {
 };
 
 describe("plan refinement", () => {
-  it("adjusts daily availability in mock mode", () => {
+  it("does not persist a fixed daily availability in mock mode", () => {
     const output = generateMockRefinement(assignment, "我每天只有 30 分钟可用");
     const refined = applyRefinement(assignment, output);
 
-    expect(output.changed).toBe(true);
-    expect(refined.availability.dailyMinutes).toBe(30);
+    expect(output.changed).toBe(false);
+    expect(refined.availability.dailyMinutes).toBe(60);
   });
 
   it("preserves execution records while merging AI task changes", () => {
@@ -68,7 +68,7 @@ describe("plan refinement", () => {
         {
           ...assignment.subtasks[0],
           id: "topic",
-          title: "拆解作业需求与定主题",
+          title: "拆解任务需求与定主题",
           description: "确定论文研究主题",
         },
         {
@@ -85,7 +85,7 @@ describe("plan refinement", () => {
     );
     const refined = applyRefinement(chineseAssignment, output);
 
-    expect(output.assistantMessage).toContain("拆解作业需求与定主题");
+    expect(output.assistantMessage).toContain("拆解任务需求与定主题");
     expect(refined.subtasks[0]?.status).toBe("completed");
     expect(refined.subtasks[1]?.status).toBe("paused");
   });

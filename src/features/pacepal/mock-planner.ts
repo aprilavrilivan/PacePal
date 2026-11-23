@@ -7,7 +7,7 @@ import {
 
 const planTemplate = [
   {
-    title: "理解作业要求",
+    title: "理解任务要求",
     description: "提取目标、格式、评分重点与提交要求。",
     estimatedMinutes: 25,
     completionCriteria: "整理出一份要求清单",
