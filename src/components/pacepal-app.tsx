@@ -202,7 +202,6 @@ export function PacePalApp() {
   const [dashboardView, setDashboardView] = useState<DashboardView>("overview");
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [form, setForm] = useState<AssignmentInput>(emptyForm);
-  const [taskStartTime, setTaskStartTime] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [planError, setPlanError] = useState("");
@@ -225,6 +224,7 @@ export function PacePalApp() {
     useState(false);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [todayPlanEditing, setTodayPlanEditing] = useState(false);
+  const [todayPlanStartTime, setTodayPlanStartTime] = useState("09:00");
   const [todayPlanDraft, setTodayPlanDraft] = useState<TodayPlanDraftItem[]>(
     [],
   );
@@ -470,7 +470,6 @@ export function PacePalApp() {
   function openCreate() {
     setFormMode("create");
     setForm(emptyForm);
-    setTaskStartTime("");
     setErrors({});
     setScreen("create");
   }
@@ -485,7 +484,6 @@ export function PacePalApp() {
       deadline: assignment.deadline,
       priority: assignment.priority,
     });
-    setTaskStartTime(assignment.availability.preferredTime);
     setErrors({});
     setScreen("create");
   }
@@ -501,11 +499,7 @@ export function PacePalApp() {
         form.title !== assignment.title ||
         form.requirements !== assignment.requirements ||
         form.deliverable !== assignment.deliverable;
-      const availability = {
-        ...assignment.availability,
-        preferredTime: taskStartTime,
-      };
-      const candidate = { ...assignment, ...form, availability };
+      const candidate = { ...assignment, ...form };
       setPlanBusy(true);
 
       if (planningFieldsChanged) {
@@ -515,7 +509,7 @@ export function PacePalApp() {
             "任务名称、要求或成果形式已经修改。请重新理解目标，只调整尚未完成的任务，保留已完成工作，并重新安排后续计划。",
           );
           updateAssignment((current) => {
-            const edited = { ...current, ...form, availability };
+            const edited = { ...current, ...form };
             const refined = response.changed
               ? applyRefinement(edited, response)
               : edited;
@@ -529,7 +523,7 @@ export function PacePalApp() {
         } catch {
           updateAssignment((current) =>
             rebuildAssignmentSchedule(
-              { ...current, ...form, availability },
+              { ...current, ...form },
               "任务信息已更新；AI 暂时不可用，原任务已保留",
             ),
           );
@@ -537,7 +531,7 @@ export function PacePalApp() {
       } else {
         updateAssignment((current) =>
           rebuildAssignmentSchedule(
-            { ...current, ...form, availability },
+            { ...current, ...form },
             "截止时间或优先级已更新，安排已重算",
           ),
         );
@@ -565,7 +559,7 @@ export function PacePalApp() {
       createdAt: new Date().toISOString(),
       status: "planning",
       subtasks,
-      availability: { dailyMinutes: 240, preferredTime: taskStartTime },
+      availability: { dailyMinutes: 240, preferredTime: "09:00" },
       schedule: [],
       unscheduledMinutes: 0,
       checkIn: { availableMinutes: 30, energy: "medium" },
@@ -905,6 +899,7 @@ export function PacePalApp() {
   }
 
   function openTodayPlanEditor() {
+    setTodayPlanStartTime(todayBlocks[0]?.block.startTime ?? "09:00");
     setTodayPlanDraft(
       todayBlocks.map(({ assignment: item, block }) => ({
         assignmentId: item.id,
@@ -958,11 +953,8 @@ export function PacePalApp() {
   }
 
   function saveTodayPlan() {
+    if (!/^\d{2}:\d{2}$/.test(todayPlanStartTime)) return;
     const today = currentDateKey();
-    const firstStart =
-      todayBlocks[0]?.block.startTime ??
-      assignment?.availability.preferredTime ??
-      "18:00";
     let elapsedMinutes = 0;
     const normalized = todayPlanDraft.map((item) => {
       const block = {
@@ -970,7 +962,7 @@ export function PacePalApp() {
         date: today,
         durationMinutes: Math.max(5, item.durationMinutes),
         locked: true,
-        startTime: addMinutesToTime(firstStart, elapsedMinutes),
+        startTime: addMinutesToTime(todayPlanStartTime, elapsedMinutes),
       };
       elapsedMinutes += block.durationMinutes;
       return block;
@@ -1308,7 +1300,7 @@ export function PacePalApp() {
               />
             </FormField>
 
-            <div className="grid gap-6 sm:grid-cols-3">
+            <div className="grid gap-6 sm:grid-cols-2">
               <FormField label="截止时间" error={errors.deadline}>
                 <input
                   className={fieldClassName}
@@ -1321,17 +1313,6 @@ export function PacePalApp() {
                       deadline: event.target.value,
                     }))
                   }
-                />
-              </FormField>
-
-              <FormField label="开始时间">
-                <input
-                  className={fieldClassName}
-                  id="startTime"
-                  onChange={(event) => setTaskStartTime(event.target.value)}
-                  required
-                  type="time"
-                  value={taskStartTime}
                 />
               </FormField>
 
@@ -2092,6 +2073,7 @@ export function PacePalApp() {
                     </button>
                     <button
                       className={primaryButtonClassName}
+                      disabled={!/^\d{2}:\d{2}$/.test(todayPlanStartTime)}
                       onClick={saveTodayPlan}
                       type="button"
                     >
@@ -2111,6 +2093,20 @@ export function PacePalApp() {
 
               {todayPlanEditing ? (
                 <div className="mt-5">
+                  <div className="mb-5 max-w-56">
+                    <FormField label="开始时间">
+                      <input
+                        className={fieldClassName}
+                        id="today-plan-start-time"
+                        onChange={(event) =>
+                          setTodayPlanStartTime(event.target.value)
+                        }
+                        required
+                        type="time"
+                        value={todayPlanStartTime}
+                      />
+                    </FormField>
+                  </div>
                   <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                     {todayPlanDraft.map((draft, index) => {
                       const item = assignments.find(

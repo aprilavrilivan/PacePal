@@ -32,7 +32,6 @@ test("creates, approves, schedules, and persists an assignment", async ({
   ).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`;
 
   await page.getByLabel("截止时间").fill(localDeadline);
-  await page.getByLabel("开始时间").fill("18:00");
   await page.getByRole("button", { name: "保存并生成任务" }).click();
 
   await expect(
@@ -47,13 +46,16 @@ test("creates, approves, schedules, and persists an assignment", async ({
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "待完成任务" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "今日计划" })).toBeVisible();
+  await expect(page.getByText("09:00", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "手动调整今日计划" }).click();
+  await page.getByLabel("开始时间").fill("10:15");
   await page
     .getByLabel(/今日计划分钟/)
     .first()
     .fill("25");
   await page.getByRole("button", { name: "保存今日计划" }).click();
+  await expect(page.getByText("10:15", { exact: true }).first()).toBeVisible();
   await expect(
     page.getByRole("progressbar", { name: "今日任务进度" }),
   ).toBeVisible();
@@ -132,7 +134,6 @@ test("keeps multiple assignments and lets the user switch between them", async (
     deadline.setDate(deadline.getDate() + daysFromNow);
     const value = `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`;
     await page.getByLabel("截止时间").fill(value);
-    await page.getByLabel("开始时间").fill("18:00");
     await page.getByRole("button", { name: "保存并生成任务" }).click();
     await page.getByRole("button", { name: "确认任务计划" }).click();
   }
