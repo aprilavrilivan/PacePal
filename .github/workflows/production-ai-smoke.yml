@@ -22,6 +22,7 @@ on:
       - src/features/pacepal/plan-api.ts
       - src/features/pacepal/refinement.ts
       - src/features/pacepal/refinement-quality.ts
+      - src/features/pacepal/refinement-summary.ts
       - src/features/pacepal/scheduler.ts
 
 permissions:
@@ -176,18 +177,12 @@ jobs:
             local name="$1"
             local message="$2"
             local response
-            for attempt in 1 2; do
-              response="$(jq -n --argjson assignment "$assignment" --arg message "$message" \
-                '{assignment: $assignment, message: $message}' | \
-                curl -fsS --max-time 90 \
-                  -H 'Content-Type: application/json' \
-                  --data-binary @- \
-                  https://pace-pal-eta.vercel.app/api/refine)"
-              if jq -e '.fallback == false' <<<"$response" >/dev/null; then
-                break
-              fi
-              sleep 20
-            done
+            response="$(jq -n --argjson assignment "$assignment" --arg message "$message" \
+              '{assignment: $assignment, message: $message}' | \
+              curl -fsS --max-time 90 \
+                -H 'Content-Type: application/json' \
+                --data-binary @- \
+                https://pace-pal-eta.vercel.app/api/refine)"
             echo "### $name" >> "$GITHUB_STEP_SUMMARY"
             jq -r '"- fallback: `\(.fallback)`\n- assistant: \(.assistantMessage)\n- operations: `\(.operations | map(.type) | join(", "))`"' \
               <<<"$response" >> "$GITHUB_STEP_SUMMARY"
@@ -215,9 +210,11 @@ jobs:
           printf 'BLOCKED_RESULT=%s\n' "$blocked"
           printf 'REMAINING_RESULT=%s\n' "$remaining"
 
-          jq -e '.fallback == false' <<<"$vague" >/dev/null
           jq -e '
-            .fallback == false and
+            (.operations | any(.type == "reschedule")) and
+            (.assistantMessage | contains("顺序保持不变"))
+          ' <<<"$vague" >/dev/null
+          jq -e '
             (.operations | any(.type == "reorder_tasks")) and
             (.operations | any(
               .type == "update_task" and
@@ -225,18 +222,21 @@ jobs:
             ))
           ' <<<"$explicit" >/dev/null
           jq -e '
-            .fallback == false and
             (.operations | any(
               .type == "set_status" and
               .status == "blocked"
             ))
           ' <<<"$blocked" >/dev/null
           jq -e '
-            .fallback == false and
-            ([.operations[] | select(
-              .type == "set_status" and
-              .status == "completed"
-            )] | length >= 3) and
+            ([.operations[] | select(.type == "set_status" and .status == "completed") | .taskId]
+              | contains(["sources", "outline", "draft"])) and
+            (.operations | any(
+              .type == "reorder_tasks" and
+              .taskIds[0:2] == ["polish", "submit"]
+            )) and
+            (.operations | all(
+              (.type != "reopen_task") or .taskId != "topic"
+            )) and
             (.operations | any(.type == "reschedule")) and
             (.assistantMessage | length > 30)
           ' <<<"$remaining" >/dev/null

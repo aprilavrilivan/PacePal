@@ -8,6 +8,7 @@ import {
 } from "@/features/pacepal/refinement";
 import { generateMockRefinement } from "@/features/pacepal/mock-refiner";
 import { findReferencedTask } from "@/features/pacepal/refinement-intent";
+import { summarizeRefinementOperations } from "@/features/pacepal/refinement-summary";
 
 const recordSchema = z.record(z.string(), z.unknown());
 
@@ -681,62 +682,45 @@ export function normalizeGatewayRefinement(
     .slice(0, 64);
   const changed = deduplicated.length > 0;
 
-  const taskById = new Map(
-    assignment.subtasks.map((task) => [task.id, task.title]),
-  );
-  const blocked = deduplicated.find(
-    (operation) =>
-      operation.type === "set_status" && operation.status === "blocked",
-  );
-  const reordered = deduplicated.some(
-    (operation) => operation.type === "reorder_tasks",
-  );
-  const dependenciesChanged = deduplicated.some(
-    (operation) =>
-      operation.type === "update_task" &&
-      operation.patch.dependencies !== undefined,
-  );
-  const availabilityChanged = deduplicated.some(
-    (operation) => operation.type === "set_availability",
-  );
-  const onlyRescheduled =
-    deduplicated.length === 1 && deduplicated[0]?.type === "reschedule";
-
-  let verifiedMessage = stringFor(source, [
+  const originalMessage = stringFor(source, [
     "assistantMessage",
     "assistant_message",
     "message",
     "response",
     "summary",
   ]);
-  const hasGroundedNarrative =
-    stringFor(source, ["understanding"]).length > 0 &&
-    (stringFor(source, ["changeSummary", "change_summary"]).length > 0 ||
-      Boolean(valueFor(source, ["needsClarification", "needs_clarification"])));
-  if (!hasGroundedNarrative) {
-    if (blocked?.type === "set_status") {
-      verifiedMessage = `已将“${taskById.get(blocked.taskId) ?? "相关任务"}”标记为卡住，并重新安排其他可执行任务。`;
-    } else if (reordered && dependenciesChanged) {
-      verifiedMessage = "已调整任务顺序和依赖关系，并重新计算后续日程。";
-    } else if (reordered) {
-      verifiedMessage = "已调整任务顺序，并重新计算后续日程。";
-    } else if (availabilityChanged) {
-      verifiedMessage = "已更新可用时间，并重新计算后续日程。";
-    } else if (onlyRescheduled) {
-      verifiedMessage = "已重新计算后续日程，任务内容和顺序保持不变。";
-    }
-  }
-
-  if (semanticRepairAddedOperations && semanticRepair) {
-    verifiedMessage = semanticRepair.assistantMessage;
-  }
+  const modelUnderstanding = stringFor(source, ["understanding"]);
+  const repairUnderstanding = semanticRepair?.assistantMessage
+    .split(/\n\s*\n/)[0]
+    ?.trim();
+  const originalUnderstanding = originalMessage.split(/\n\s*\n/)[0]?.trim();
+  const understanding =
+    (semanticRepairAddedOperations
+      ? repairUnderstanding
+      : modelUnderstanding) ||
+    modelUnderstanding ||
+    repairUnderstanding ||
+    originalUnderstanding ||
+    "我理解了你对当前任务状态和计划的最新说明。";
+  const groundedSummary = summarizeRefinementOperations(
+    assignment,
+    deduplicated,
+  );
+  const needsClarification =
+    valueFor(source, ["needsClarification", "needs_clarification"]) === true;
+  const clarificationQuestion = stringFor(source, [
+    "clarificationQuestion",
+    "clarification_question",
+    "question",
+  ]);
+  const verifiedMessage = changed
+    ? `${understanding}\n\n${groundedSummary}`
+    : needsClarification && clarificationQuestion
+      ? `${understanding}\n\n${clarificationQuestion}`
+      : originalMessage || groundedSummary;
 
   return refinementOutputSchema.parse({
-    assistantMessage:
-      verifiedMessage ||
-      (changed
-        ? "已根据你的最新情况更新计划。"
-        : "我没有找到需要修改的计划内容。"),
+    assistantMessage: verifiedMessage || "我没有找到需要修改的计划内容。",
     changed,
     operations: deduplicated,
   });

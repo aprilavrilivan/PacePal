@@ -60,7 +60,10 @@ export type PlanningModelProfile =
     };
 
 export function planningModelProfiles(): PlanningModelProfile[] {
-  const directGoogle = serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY
+  const hasDirectGoogle = Boolean(
+    serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
+  );
+  const directGoogle = hasDirectGoogle
     ? [
         {
           id: serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL,
@@ -71,7 +74,14 @@ export function planningModelProfiles(): PlanningModelProfile[] {
       ]
     : [];
 
-  return [...directGoogle, ...gatewayModelProfiles];
+  // Do not call the same Gemini model a second time through AI Gateway after
+  // the direct key has already hit a quota/capacity error. Move immediately to
+  // a genuinely independent provider so the user gets a faster recovery.
+  const gatewayFallbacks = hasDirectGoogle
+    ? gatewayModelProfiles.filter((profile) => profile.id !== gatewayModel)
+    : [...gatewayModelProfiles];
+
+  return [...directGoogle, ...gatewayFallbacks];
 }
 
 export function publicModelName(profile: PlanningModelProfile) {

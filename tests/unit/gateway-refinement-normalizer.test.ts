@@ -56,10 +56,9 @@ describe("gateway refinement normalization", () => {
       assignment,
     );
 
-    expect(output).toMatchObject({
-      assistantMessage: "已更新可用时间，并重新计算后续日程。",
-      changed: true,
-    });
+    expect(output.changed).toBe(true);
+    expect(output.assistantMessage).toContain("更新计划时间设置");
+    expect(output.assistantMessage).toContain("重新计算后续安排");
     expect(output.operations).toEqual(
       expect.arrayContaining([
         {
@@ -119,7 +118,7 @@ describe("gateway refinement normalization", () => {
     );
 
     expect(output.assistantMessage).toContain("我理解为“Research”目前遇到阻塞");
-    expect(output.assistantMessage).toContain("重新安排其他可执行任务");
+    expect(output.assistantMessage).toContain("优先重排其他可执行工作");
     expect(output.operations).toEqual([
       { status: "blocked", taskId: "research", type: "set_status" },
       { type: "reschedule" },
@@ -268,9 +267,8 @@ describe("gateway refinement normalization", () => {
       "重新平衡后续任务",
     );
 
-    expect(output.assistantMessage).toBe(
-      "已重新计算后续日程，任务内容和顺序保持不变。",
-    );
+    expect(output.assistantMessage).toContain("重新计算后续安排");
+    expect(output.assistantMessage).toContain("任务内容和顺序保持不变");
   });
 
   it("preserves a grounded conversational explanation from the planner", () => {
@@ -290,7 +288,7 @@ describe("gateway refinement normalization", () => {
     );
 
     expect(output.assistantMessage).toContain("我理解为研究部分已经完成");
-    expect(output.assistantMessage).toContain("我已把研究标记为完成");
+    expect(output.assistantMessage).toContain("“Research” 标记为完成");
   });
 
   it("accepts an explicit operation that reopens a mistakenly completed task", () => {

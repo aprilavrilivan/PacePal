@@ -2,6 +2,7 @@ import { ZodError } from "zod";
 
 import { classifyGatewayFailure } from "@/features/pacepal/gateway-error";
 import { gatewayModel } from "@/features/pacepal/gateway-planner";
+import { normalizeGatewayRefinement } from "@/features/pacepal/gateway-refinement-normalizer";
 import { generateGatewayRefinement } from "@/features/pacepal/gateway-refiner";
 import { generateMockRefinement } from "@/features/pacepal/mock-refiner";
 import {
@@ -30,7 +31,11 @@ export async function POST(request: Request) {
     const { assignment, message } = refinementRequestSchema.parse(
       await request.json(),
     );
-    const mockOutput = generateMockRefinement(assignment, message);
+    const mockOutput = normalizeGatewayRefinement(
+      generateMockRefinement(assignment, message),
+      assignment,
+      message,
+    );
 
     if (serverEnvironment.AI_PROVIDER === "mock") {
       return Response.json({

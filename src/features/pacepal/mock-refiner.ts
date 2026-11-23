@@ -26,6 +26,37 @@ function quotedWork(message: string) {
   );
 }
 
+function remainingScopeFragment(message: string) {
+  const marker = /(只剩(?:下)?|还剩(?:下)?|剩余|remaining|left|only)/i.exec(
+    message,
+  );
+  if (!marker) return "";
+
+  const afterMarker = message.slice(marker.index + marker[0].length);
+  const end =
+    afterMarker.search(
+      /(?:其他|其余|剩下的|everything else|all (?:the )?other(?:s)?).{0,16}(?:完成|做完|结束|done|finished)/i,
+    ) ?? -1;
+  const scoped = end >= 0 ? afterMarker.slice(0, end) : afterMarker;
+  // A remaining-work declaration often spans more than one sentence, for
+  // example “只剩 A、B。然后是 C，其他都完成了”. Keep everything up to the
+  // explicit “其他都完成” boundary instead of dropping C at the first full
+  // stop. Quoted-work extraction below will still isolate the concrete items.
+  return scoped.replace(/^[：:\s，,]+|[：:\s，,]+$/g, "").trim();
+}
+
+function workPhrases(fragment: string) {
+  const quoted = quotedWork(fragment);
+  if (quoted.length > 0) return quoted;
+
+  return unique(
+    fragment
+      .split(/(?:、|，|,|；|;|\s+(?:and|then)\s+|\s+和\s*|以及|然后|接着)/i)
+      .map((part) => part.replace(/^(?:就是|包括|are|is)\s*/i, "").trim())
+      .filter((part) => part.length >= 2),
+  );
+}
+
 function safeTaskId(title: string, usedIds: Set<string>) {
   const base =
     title
@@ -58,12 +89,11 @@ function authoritativeRemainingRefinement(
 ): RefinementOutput | null {
   if (!hasAuthoritativeRemainingScope(message)) return null;
 
-  const namedWork = quotedWork(message);
-  const directlyReferenced = findReferencedTasks(assignment, message, true);
-  const phrases =
-    namedWork.length > 0
-      ? namedWork
-      : directlyReferenced.map((task) => task.title);
+  // Only inspect the clause after “只剩 / only / left”. The same message often
+  // names already-completed work before that marker; matching the whole message
+  // would incorrectly reopen it as remaining work.
+  const remainingFragment = remainingScopeFragment(message);
+  const phrases = workPhrases(remainingFragment);
   if (phrases.length === 0) return null;
 
   const operations: RefinementOperation[] = [];
@@ -73,6 +103,10 @@ function authoritativeRemainingRefinement(
   let previousId: string | null = null;
 
   for (const phrase of phrases) {
+    // A short phrase can legitimately share vocabulary with two adjacent
+    // steps (for example "format check" and "final submission review").
+    // Prefer the strongest task that has not already been claimed by another
+    // remaining phrase instead of silently dropping the second item.
     const matched = findReferencedTasks(assignment, phrase, true).find(
       (task) => !remainingIds.includes(task.id),
     );
@@ -173,12 +207,6 @@ export function generateMockRefinement(
 ): RefinementOutput {
   const operations: RefinementOperation[] = [];
   const availableMatch = message.match(/(\d{1,3})\s*分钟/);
-
-  if (availableMatch && /(每天|时间|可用|安排)/.test(message)) {
-    return unchanged(
-      "不记录固定的每日可用时间。你可以在“今日重点”按当下可用时间和精力获取推荐。",
-    );
-  }
 
   const remainingScope = authoritativeRemainingRefinement(assignment, message);
   if (remainingScope) return remainingScope;
@@ -284,6 +312,17 @@ export function generateMockRefinement(
       changed: true,
       operations: [{ type: "reschedule" }],
     };
+  }
+
+  if (
+    availableMatch &&
+    /(?:每天|每日).{0,16}(?:可用|时间)|(?:可用|时间).{0,16}(?:每天|每日)/.test(
+      message,
+    )
+  ) {
+    return unchanged(
+      "不记录固定的每日可用时间。你可以在“今日重点”按当下可用时间和精力获取推荐。",
+    );
   }
 
   return unchanged(
