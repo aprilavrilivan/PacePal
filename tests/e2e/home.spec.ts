@@ -101,9 +101,10 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await page.getByLabel("给 AI 助手的消息").fill("我已经完成了理解任务要求");
   await page.getByRole("button", { name: "发送" }).click();
   await expect(
-    page.getByText(
-      "已将“理解任务要求”标记为完成，并根据当前进度重排后续任务。",
-    ),
+    page.getByText(/我理解为.*“理解任务要求”.*已经完成/),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/我已更新这 1 项的状态.*重新安排尚未完成的任务/),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "安排" }).click();
@@ -157,6 +158,7 @@ test("reports a healthy mock foundation", async ({ request }) => {
     aiProvider: "mock",
     app: "PacePal",
     commitSha: null,
+    directGeminiConfigured: false,
     status: "ok",
   });
 });

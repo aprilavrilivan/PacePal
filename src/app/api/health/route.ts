@@ -8,6 +8,9 @@ export function GET() {
     aiProvider: serverEnvironment.AI_PROVIDER,
     app: appConfig.name,
     commitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+    directGeminiConfigured: Boolean(
+      serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
+    ),
     status: "ok",
   });
 }

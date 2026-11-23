@@ -1,13 +1,25 @@
 import type { Assignment, Subtask } from "@/features/pacepal/model";
 
 const conceptGroups = [
-  ["主题", "选题", "题目", "研究问题", "研究方向"],
-  ["要求", "需求", "题意", "作业说明"],
-  ["资料", "史料", "文献", "来源", "调研", "研究"],
-  ["提纲", "大纲", "结构", "框架"],
-  ["初稿", "第一稿", "正文", "撰写", "写作"],
-  ["润色", "修改", "校对", "格式", "引用"],
-  ["提交", "核对", "检查", "上传"],
+  ["主题", "选题", "题目", "研究问题", "研究方向", "topic", "question"],
+  ["要求", "需求", "题意", "任务说明", "requirement", "scope"],
+  [
+    "资料",
+    "史料",
+    "文献",
+    "来源",
+    "调研",
+    "研究",
+    "literature",
+    "source",
+    "research",
+  ],
+  ["提纲", "大纲", "结构", "框架", "outline", "structure"],
+  ["初稿", "第一稿", "正文", "撰写", "写作", "draft", "writing", "paper"],
+  ["实验", "操控", "操作", "manipulation", "experiment"],
+  ["平衡", "方案", "选项", "balanced", "option"],
+  ["润色", "修改", "校对", "格式", "引用", "revise", "format", "edit"],
+  ["提交", "核对", "检查", "上传", "submit", "review", "check"],
 ] as const;
 
 export function progressFragment(message: string) {
@@ -15,12 +27,16 @@ export function progressFragment(message: string) {
 }
 
 function taskScore(task: Subtask, message: string) {
-  const taskText = `${task.title} ${task.description} ${task.completionCriteria}`;
-  let score = message.includes(task.title) ? 20 : 0;
+  const normalizedMessage = message.toLocaleLowerCase();
+  const taskText =
+    `${task.title} ${task.description} ${task.completionCriteria}`.toLocaleLowerCase();
+  let score = normalizedMessage.includes(task.title.toLocaleLowerCase())
+    ? 20
+    : 0;
 
   for (const group of conceptGroups) {
     if (
-      group.some((term) => message.includes(term)) &&
+      group.some((term) => normalizedMessage.includes(term)) &&
       group.some((term) => taskText.includes(term))
     ) {
       score += 4;
@@ -29,7 +45,10 @@ function taskScore(task: Subtask, message: string) {
 
   for (let index = 0; index < task.title.length - 1; index += 1) {
     const pair = task.title.slice(index, index + 2);
-    if (!/[\s：:，,。.!！?？]/.test(pair) && message.includes(pair)) {
+    if (
+      !/[\s：:，,。.!！?？]/.test(pair) &&
+      normalizedMessage.includes(pair.toLocaleLowerCase())
+    ) {
       score += 1;
     }
   }
@@ -51,4 +70,25 @@ export function findReferencedTask(assignment: Assignment, message: string) {
     .sort((left, right) => right.score - left.score);
   if ((ranked[0]?.score ?? 0) >= 2) return ranked[0]?.task ?? null;
   return candidates.length === 1 ? candidates[0] : null;
+}
+
+export function findReferencedTasks(
+  assignment: Assignment,
+  message: string,
+  includeCompleted = false,
+) {
+  return assignment.subtasks
+    .filter((task) => includeCompleted || task.status !== "completed")
+    .map((task) => ({ score: taskScore(task, message), task }))
+    .filter(({ score }) => score >= 2)
+    .sort((left, right) => right.score - left.score)
+    .map(({ task }) => task);
+}
+
+export function findTaskForPhrase(
+  assignment: Assignment,
+  phrase: string,
+  includeCompleted = true,
+) {
+  return findReferencedTasks(assignment, phrase, includeCompleted)[0] ?? null;
 }

@@ -17,7 +17,7 @@ function fallbackPlan(output: RefinementOutput, fallbackReason: string) {
   return {
     ...output,
     assistantMessage: output.changed
-      ? output.assistantMessage
+      ? `主模型当前繁忙，我先根据你明确提供的信息完成了安全调整。\n\n${output.assistantMessage}`
       : "AI 暂时不可用，我没有擅自修改你的计划。请稍后重试。",
     fallback: true,
     fallbackReason,

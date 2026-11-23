@@ -1,6 +1,8 @@
 import type { Assignment } from "@/features/pacepal/model";
 import {
   findReferencedTask,
+  findReferencedTasks,
+  findTaskForPhrase,
   progressFragment,
 } from "@/features/pacepal/refinement-intent";
 import type {
@@ -10,6 +12,157 @@ import type {
 
 function unchanged(message: string): RefinementOutput {
   return { assistantMessage: message, changed: false, operations: [] };
+}
+
+function unique<T>(values: T[]) {
+  return [...new Set(values)];
+}
+
+function quotedWork(message: string) {
+  return unique(
+    [...message.matchAll(/["“”'‘’]([^"“”'‘’]{2,80})["“”'‘’]/g)]
+      .map((match) => match[1]?.trim() ?? "")
+      .filter(Boolean),
+  );
+}
+
+function safeTaskId(title: string, usedIds: Set<string>) {
+  const base =
+    title
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40) || "new-task";
+  let id = base;
+  let suffix = 2;
+  while (usedIds.has(id)) {
+    id = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(id);
+  return id;
+}
+
+function hasAuthoritativeRemainingScope(message: string) {
+  return (
+    /(只剩|还剩下?|剩余|remaining|left|only)/i.test(message) &&
+    /(其他|其余|剩下的|everything else|all other).{0,12}(完成|做完|结束|done|finished)/i.test(
+      message,
+    )
+  );
+}
+
+function authoritativeRemainingRefinement(
+  assignment: Assignment,
+  message: string,
+): RefinementOutput | null {
+  if (!hasAuthoritativeRemainingScope(message)) return null;
+
+  const namedWork = quotedWork(message);
+  const directlyReferenced = findReferencedTasks(assignment, message, true);
+  const phrases =
+    namedWork.length > 0
+      ? namedWork
+      : directlyReferenced.map((task) => task.title);
+  if (phrases.length === 0) return null;
+
+  const operations: RefinementOperation[] = [];
+  const remainingIds: string[] = [];
+  const remainingTitles: string[] = [];
+  const usedIds = new Set(assignment.subtasks.map((task) => task.id));
+  let previousId: string | null = null;
+
+  for (const phrase of phrases) {
+    const matched = findTaskForPhrase(assignment, phrase, true);
+    if (matched && !remainingIds.includes(matched.id)) {
+      remainingIds.push(matched.id);
+      remainingTitles.push(matched.title);
+      previousId = matched.id;
+      if (matched.status === "completed") {
+        operations.push({
+          type: "reopen_task",
+          taskId: matched.id,
+          status: "todo",
+        });
+      }
+      continue;
+    }
+
+    const id = safeTaskId(phrase, usedIds);
+    operations.push({
+      type: "add_task",
+      afterTaskId: previousId,
+      task: {
+        id,
+        title: phrase,
+        description: `完成 ${phrase}`,
+        estimatedMinutes: 60,
+        completionCriteria: `${phrase} 已达到可交付状态`,
+        difficulty: "medium",
+        dependencies: previousId ? [previousId] : [],
+      },
+    });
+    remainingIds.push(id);
+    remainingTitles.push(phrase);
+    previousId = id;
+  }
+
+  const completedTitles: string[] = [];
+  for (const task of assignment.subtasks) {
+    if (task.status !== "completed" && !remainingIds.includes(task.id)) {
+      operations.push({
+        type: "set_status",
+        taskId: task.id,
+        status: "completed",
+      });
+      completedTitles.push(task.title);
+    }
+  }
+
+  if (remainingIds.length > 1) {
+    operations.push({ type: "reorder_tasks", taskIds: remainingIds });
+  }
+  operations.push({ type: "reschedule" });
+
+  const completedSummary =
+    completedTitles.length > 0
+      ? `并将其余 ${completedTitles.length} 个步骤按你的说明记为完成`
+      : "并保留已有完成记录";
+  return {
+    assistantMessage: `我理解为现在只剩 ${remainingTitles.map((title) => `“${title}”`).join("、")}，其他工作都已经完成。\n\n我已保留或补充这 ${remainingTitles.length} 项剩余工作，${completedSummary}，再按上述顺序重新安排后续计划。`,
+    changed: true,
+    operations,
+  };
+}
+
+function explicitOrderRefinement(
+  assignment: Assignment,
+  message: string,
+): RefinementOutput | null {
+  const orderMatch = message.match(/先(.{1,100}?)(?:再|然后|接着)(.{1,100})/);
+  if (!orderMatch) return null;
+
+  const first = findTaskForPhrase(assignment, orderMatch[1] ?? "", false);
+  const second = findTaskForPhrase(assignment, orderMatch[2] ?? "", false);
+  if (!first || !second || first.id === second.id) return null;
+
+  const pendingIds = assignment.subtasks
+    .filter((task) => task.status !== "completed")
+    .map((task) => task.id);
+  const orderedIds = [
+    first.id,
+    second.id,
+    ...pendingIds.filter((id) => id !== first.id && id !== second.id),
+  ];
+
+  return {
+    assistantMessage: `我理解为你希望先做“${first.title}”，再做“${second.title}”。\n\n我已把这两项移到后续任务最前面，并按这个顺序重新计算安排；其他未完成任务保持不变。`,
+    changed: true,
+    operations: [
+      { type: "reorder_tasks", taskIds: orderedIds },
+      { type: "reschedule" },
+    ],
+  };
 }
 
 export function generateMockRefinement(
@@ -25,16 +178,42 @@ export function generateMockRefinement(
     );
   }
 
+  const remainingScope = authoritativeRemainingRefinement(assignment, message);
+  if (remainingScope) return remainingScope;
+
+  const explicitOrder = explicitOrderRefinement(assignment, message);
+  if (explicitOrder) return explicitOrder;
+
   if (
     /(已完成|完成了|做完了|已经做完|搞定了|finished|\bdone\b)/i.test(message)
   ) {
-    const task = findReferencedTask(assignment, progressFragment(message));
-    if (task) {
+    const progress = progressFragment(message);
+    const exactTasks = assignment.subtasks.filter(
+      (task) =>
+        task.status !== "completed" &&
+        progress.toLocaleLowerCase().includes(task.title.toLocaleLowerCase()),
+    );
+    const tasks =
+      exactTasks.length > 0
+        ? exactTasks
+        : findReferencedTasks(assignment, progress);
+    const matchedTasks =
+      tasks.length > 0
+        ? tasks
+        : [findReferencedTask(assignment, progress)].filter(
+            (task): task is NonNullable<typeof task> => Boolean(task),
+          );
+    if (matchedTasks.length > 0) {
+      const titles = matchedTasks.map((task) => task.title);
       return {
-        assistantMessage: `已将“${task.title}”标记为完成，并根据当前进度重排后续任务。`,
+        assistantMessage: `我理解为 ${titles.map((title) => `“${title}”`).join("、")} 已经完成。\n\n我已更新这 ${titles.length} 项的状态，并根据最新进度重新安排尚未完成的任务。`,
         changed: true,
         operations: [
-          { type: "set_status", taskId: task.id, status: "completed" },
+          ...matchedTasks.map((task): RefinementOperation => ({
+            type: "set_status",
+            taskId: task.id,
+            status: "completed",
+          })),
           { type: "reschedule" },
         ],
       };
@@ -45,7 +224,7 @@ export function generateMockRefinement(
     const task = findReferencedTask(assignment, message);
     if (task) {
       return {
-        assistantMessage: `已将“${task.title}”标记为受阻，暂时推荐其他可执行任务。`,
+        assistantMessage: `我理解为“${task.title}”目前遇到阻塞，暂时不能继续。\n\n我已把它标记为受阻，并重新安排其他可执行任务；解除阻塞后可以随时继续。`,
         changed: true,
         operations: [
           { type: "set_status", taskId: task.id, status: "blocked" },
@@ -89,7 +268,7 @@ export function generateMockRefinement(
       });
       operations.push({ type: "reschedule" });
       return {
-        assistantMessage: `已把“${target.title}”拆成两个更容易开始的步骤。`,
+        assistantMessage: `我理解为“${target.title}”目前太大，不容易直接开始。\n\n我已把它拆成两个更小的连续步骤，保留原有进度记录，并重新安排后续计划。`,
         changed: true,
         operations,
       };
@@ -98,7 +277,8 @@ export function generateMockRefinement(
 
   if (/(重新平衡|重新安排|重排|调整后续)/.test(message)) {
     return {
-      assistantMessage: "已根据当前进度、截止时间和任务依赖重新安排后续任务。",
+      assistantMessage:
+        "我理解为你希望在不改变任务内容的前提下，重新计算后续执行节奏。\n\n我已根据当前进度、截止时间和任务依赖重新安排后续任务。",
       changed: true,
       operations: [{ type: "reschedule" }],
     };

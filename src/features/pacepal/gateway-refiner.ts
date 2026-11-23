@@ -1,16 +1,13 @@
 import "server-only";
 
-import {
-  extractJsonMiddleware,
-  gateway,
-  generateText,
-  Output,
-  wrapLanguageModel,
-} from "ai";
+import { generateText, Output } from "ai";
 
-import { gatewayModelProfiles } from "@/features/pacepal/gateway-planner";
+import {
+  planningLanguageModel,
+  planningModelProfiles,
+  publicModelName,
+} from "@/features/pacepal/gateway-planner";
 import { classifyGatewayFailure } from "@/features/pacepal/gateway-error";
-import { extractGatewayJson } from "@/features/pacepal/gateway-json";
 import { normalizeGatewayRefinement } from "@/features/pacepal/gateway-refinement-normalizer";
 import { recommendNextTask } from "@/features/pacepal/execution";
 import type { Assignment } from "@/features/pacepal/model";
@@ -20,15 +17,6 @@ import {
   gatewayRefinementDecisionSchema,
   refinementQualityIssues,
 } from "@/features/pacepal/refinement-quality";
-
-function refinementModel(modelId: string) {
-  return wrapLanguageModel({
-    middleware: extractJsonMiddleware({
-      transform: extractGatewayJson,
-    }),
-    model: gateway(modelId),
-  });
-}
 
 function assignmentContext(assignment: Assignment) {
   const currentTask = recommendNextTask(
@@ -96,7 +84,7 @@ export async function generateGatewayRefinement(
   let lastError: unknown;
   let correction = "";
 
-  for (const profile of gatewayModelProfiles) {
+  for (const profile of planningModelProfiles()) {
     const remainingTime = deadline - Date.now();
     if (remainingTime < 3_000) break;
 
@@ -107,7 +95,7 @@ export async function generateGatewayRefinement(
         ),
         maxOutputTokens: 6000,
         maxRetries: 0,
-        model: refinementModel(profile.id),
+        model: planningLanguageModel(profile),
         output: Output.object({
           description:
             "A JSON object containing the user's task-plan interpretation, a conversational change summary, and local operations.",
@@ -181,7 +169,7 @@ export async function generateGatewayRefinement(
       );
       const issues = refinementQualityIssues(output, normalized, assignment);
       if (issues.length === 0) {
-        return { model: profile.id, output: normalized };
+        return { model: publicModelName(profile), output: normalized };
       }
 
       correction = [
@@ -195,7 +183,7 @@ export async function generateGatewayRefinement(
       correction =
         "A previous model response could not be parsed or validated. Return one complete JSON object and make every justified task change.";
       console.warn(
-        `AI refinement model ${profile.id} failed (${classifyGatewayFailure(error)}); trying next model.`,
+        `AI refinement model ${publicModelName(profile)} failed (${classifyGatewayFailure(error)}); trying next model.`,
       );
     }
   }

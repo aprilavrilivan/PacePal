@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createGoogle } from "@ai-sdk/google";
 import {
   extractJsonMiddleware,
   gateway,
@@ -19,33 +20,79 @@ import {
   type Subtask,
 } from "@/features/pacepal/model";
 import { buildSubtasks } from "@/features/pacepal/plan-api";
+import { serverEnvironment } from "@/lib/env/server";
 
 export const gatewayModel = "google/gemini-3.8-flash";
 export const gatewayModelProfiles = [
-  { id: gatewayModel, reasoning: "high" as const, timeoutMs: 14_000 },
+  {
+    id: gatewayModel,
+    provider: "gateway" as const,
+    reasoning: "high" as const,
+    timeoutMs: 14_000,
+  },
   {
     id: "recursive/flint-v1.0",
+    provider: "gateway" as const,
     reasoning: "none" as const,
     timeoutMs: 10_000,
   },
   {
     id: "nvidia/nemotron-3.5-lightning-free",
+    provider: "gateway" as const,
     reasoning: "none" as const,
     timeoutMs: 10_000,
   },
   {
     id: "reflection/beam-free",
+    provider: "gateway" as const,
     reasoning: "low" as const,
     timeoutMs: 8_000,
   },
 ] as const;
 
-function gatewayLanguageModel(modelId: string) {
+export type PlanningModelProfile =
+  | (typeof gatewayModelProfiles)[number]
+  | {
+      id: string;
+      provider: "google";
+      reasoning: "high";
+      timeoutMs: number;
+    };
+
+export function planningModelProfiles(): PlanningModelProfile[] {
+  const directGoogle = serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY
+    ? [
+        {
+          id: serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL,
+          provider: "google" as const,
+          reasoning: "high" as const,
+          timeoutMs: 16_000,
+        },
+      ]
+    : [];
+
+  return [...directGoogle, ...gatewayModelProfiles];
+}
+
+export function publicModelName(profile: PlanningModelProfile) {
+  return profile.provider === "google"
+    ? `google/${profile.id}:direct`
+    : profile.id;
+}
+
+export function planningLanguageModel(profile: PlanningModelProfile) {
+  const model =
+    profile.provider === "google"
+      ? createGoogle({
+          apiKey: serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
+        })(profile.id)
+      : gateway(profile.id);
+
   return wrapLanguageModel({
     middleware: extractJsonMiddleware({
       transform: extractGatewayJson,
     }),
-    model: gateway(modelId),
+    model,
   });
 }
 
@@ -76,7 +123,7 @@ export async function generateGatewayPlan(
   const deadline = Date.now() + 43_000;
   let lastError: unknown;
 
-  for (const profile of gatewayModelProfiles) {
+  for (const profile of planningModelProfiles()) {
     const remainingTime = deadline - Date.now();
     if (remainingTime < 3_000) break;
     try {
@@ -85,7 +132,7 @@ export async function generateGatewayPlan(
           Math.min(profile.timeoutMs, remainingTime - 1_000),
         ),
         maxOutputTokens: 4096,
-        model: gatewayLanguageModel(profile.id),
+        model: planningLanguageModel(profile),
         maxRetries: 0,
         output: Output.object({
           description:
@@ -100,13 +147,13 @@ export async function generateGatewayPlan(
       });
 
       return {
-        model: profile.id,
+        model: publicModelName(profile),
         subtasks: buildSubtasks(assignment, normalizeGatewayPlan(output).tasks),
       };
     } catch (error) {
       lastError = error;
       console.warn(
-        `AI planning model ${profile.id} failed; trying next model.`,
+        `AI planning model ${publicModelName(profile)} failed; trying next model.`,
       );
     }
   }

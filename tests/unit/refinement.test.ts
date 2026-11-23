@@ -175,4 +175,102 @@ describe("plan refinement", () => {
       title: "Research",
     });
   });
+
+  it("reconciles an authoritative mixed-language remaining scope", () => {
+    const researchAssignment: Assignment = {
+      ...assignment,
+      subtasks: [
+        {
+          ...assignment.subtasks[0],
+          id: "manipulation",
+          status: "in_progress",
+          title: "Finish manipulation tasks",
+        },
+        {
+          ...assignment.subtasks[0],
+          id: "balanced-option",
+          status: "todo",
+          title: "Find balanced option",
+        },
+        {
+          ...assignment.subtasks[0],
+          id: "literature",
+          status: "todo",
+          title: "Literature review",
+        },
+        {
+          ...assignment.subtasks[0],
+          id: "final-paper",
+          status: "completed",
+          title: "Final paper writing",
+        },
+      ],
+    };
+
+    const output = generateMockRefinement(
+      researchAssignment,
+      "我现在实验部分还剩下“finish manipulation tasks”和“find balanced option”两个。然后就是“final paper writing”，其他都做完了。你调整一下",
+    );
+    const refined = applyRefinement(researchAssignment, output);
+
+    expect(output.changed).toBe(true);
+    expect(output.assistantMessage).toContain("只剩");
+    expect(
+      refined.subtasks.find((task) => task.id === "literature")?.status,
+    ).toBe("completed");
+    expect(
+      refined.subtasks.find((task) => task.id === "final-paper")?.status,
+    ).toBe("todo");
+    expect(
+      refined.subtasks
+        .filter((task) => task.status !== "completed")
+        .map((task) => task.id),
+    ).toEqual(["manipulation", "balanced-option", "final-paper"]);
+  });
+
+  it("updates several completed tasks in one natural-language message", () => {
+    const multiTaskAssignment: Assignment = {
+      ...assignment,
+      subtasks: [
+        { ...assignment.subtasks[0], id: "research", title: "资料收集" },
+        { ...assignment.subtasks[0], id: "outline", title: "撰写大纲" },
+        { ...assignment.subtasks[0], id: "draft", title: "正文初稿" },
+      ],
+    };
+    const output = generateMockRefinement(
+      multiTaskAssignment,
+      "资料收集和撰写大纲都做完了，请按进度调整",
+    );
+    const refined = applyRefinement(multiTaskAssignment, output);
+
+    expect(refined.subtasks.map((task) => task.status)).toEqual([
+      "completed",
+      "completed",
+      "paused",
+    ]);
+    expect(output.assistantMessage).toContain("2 项");
+  });
+
+  it("honors an explicit two-step order while preserving the other tasks", () => {
+    const orderedAssignment: Assignment = {
+      ...assignment,
+      subtasks: [
+        { ...assignment.subtasks[0], id: "research", title: "资料收集" },
+        { ...assignment.subtasks[0], id: "draft", title: "撰写初稿" },
+        { ...assignment.subtasks[0], id: "outline", title: "完成大纲" },
+      ],
+    };
+    const output = generateMockRefinement(
+      orderedAssignment,
+      "请先完成大纲，然后撰写初稿，其他任务不变",
+    );
+    const refined = applyRefinement(orderedAssignment, output);
+
+    expect(refined.subtasks.map((task) => task.id)).toEqual([
+      "outline",
+      "draft",
+      "research",
+    ]);
+    expect(output.assistantMessage).toContain("先做");
+  });
 });
