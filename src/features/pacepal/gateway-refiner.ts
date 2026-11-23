@@ -96,7 +96,7 @@ export async function generateGatewayRefinement(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const { output } = await generateText({
-        abortSignal: AbortSignal.timeout(45_000),
+        abortSignal: AbortSignal.timeout(26_000),
         maxOutputTokens: 6000,
         model: refinementModel,
         output: Output.object({

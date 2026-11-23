@@ -15,11 +15,13 @@ on:
       - src/features/pacepal/execution.ts
       - src/features/pacepal/gateway-error.ts
       - src/features/pacepal/gateway-planner.ts
+      - src/features/pacepal/gateway-refinement-normalizer.ts
       - src/features/pacepal/gateway-refiner.ts
       - src/features/pacepal/mock-refiner.ts
       - src/features/pacepal/model.ts
       - src/features/pacepal/plan-api.ts
       - src/features/pacepal/refinement.ts
+      - src/features/pacepal/refinement-quality.ts
       - src/features/pacepal/scheduler.ts
 
 permissions:
@@ -32,7 +34,7 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
 
     steps:
       - name: Wait for the production deployment
@@ -63,7 +65,7 @@ jobs:
             jq '{fallback, fallbackReason, model, subtaskCount: (.subtasks | length)}' <<<"$response" || true
             if ! jq -e '
               .fallback == false and
-              .model == "nvidia/nemotron-3.5-lightning-free" and
+              .model == "google/gemini-3.8-flash" and
               (.subtasks | length >= 4)
             ' <<<"$response" >/dev/null; then
               sleep 10
@@ -91,7 +93,7 @@ jobs:
                   scheduleNotice: "",
                   chatMessages: []
                 },
-                message: "把每天可用时间调整为 45 分钟，并保持任务顺序。"
+                message: "把当前推荐的子任务拆成两个能独立完成的小步骤，并说明你理解了什么和具体改了什么。"
               }')"
             refinement="$(curl -fsS --max-time 60 \
               -H 'Content-Type: application/json' \
@@ -100,12 +102,14 @@ jobs:
             jq '{fallback, fallbackReason, model, assistantMessage, operations}' <<<"$refinement" || true
             if jq -e '
               .fallback == false and
-              .model == "nvidia/nemotron-3.5-lightning-free" and
+              .model == "google/gemini-3.8-flash" and
               (.operations | any(
-                .type == "set_availability" and
-                .availability.dailyMinutes == 45
+                .type == "add_task" or
+                .type == "update_task" or
+                .type == "remove_task"
               )) and
-              (.assistantMessage | length > 0)
+              (.operations | any(.type == "reschedule")) and
+              (.assistantMessage | length > 20)
             ' <<<"$refinement" >/dev/null; then
               exit 0
             fi
@@ -182,10 +186,14 @@ jobs:
           blocked="$(probe \
             '关键任务受阻后的主动调整' \
             '查找基础史料卡住了，明天才能拿到档案。今天有 120 分钟，请先安排不依赖档案、现在就能推进的工作。')"
+          remaining="$(probe \
+            '混合语言的实际剩余范围' \
+            '我已经完成选题、sources、outline 和 first draft。现在只剩 polish / format check 和 final submission review，其他都做完了，请按实际进度调整。')"
 
           printf 'VAGUE_RESULT=%s\n' "$vague"
           printf 'EXPLICIT_RESULT=%s\n' "$explicit"
           printf 'BLOCKED_RESULT=%s\n' "$blocked"
+          printf 'REMAINING_RESULT=%s\n' "$remaining"
 
           jq -e '.fallback == false' <<<"$vague" >/dev/null
           jq -e '
@@ -203,3 +211,12 @@ jobs:
               .status == "blocked"
             ))
           ' <<<"$blocked" >/dev/null
+          jq -e '
+            .fallback == false and
+            ([.operations[] | select(
+              .type == "set_status" and
+              .status == "completed"
+            )] | length >= 3) and
+            (.operations | any(.type == "reschedule")) and
+            (.assistantMessage | length > 30)
+          ' <<<"$remaining" >/dev/null
