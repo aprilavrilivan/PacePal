@@ -8,7 +8,10 @@ import {
   wrapLanguageModel,
 } from "ai";
 
-import { normalizeGatewayPlan } from "@/features/pacepal/gateway-plan-normalizer";
+import {
+  gatewayPlanSchema,
+  normalizeGatewayPlan,
+} from "@/features/pacepal/gateway-plan-normalizer";
 import { extractGatewayJson } from "@/features/pacepal/gateway-json";
 import {
   assignmentInputSchema,
@@ -21,14 +24,19 @@ export const gatewayModel = "google/gemini-3.8-flash";
 export const gatewayModelProfiles = [
   { id: gatewayModel, reasoning: "high" as const, timeoutMs: 14_000 },
   {
-    id: "reflection/beam-free",
-    reasoning: "medium" as const,
-    timeoutMs: 14_000,
-  },
-  {
     id: "nvidia/nemotron-3.5-lightning-free",
     reasoning: "none" as const,
-    timeoutMs: 14_000,
+    timeoutMs: 9_000,
+  },
+  {
+    id: "recursive/flint-v1.0",
+    reasoning: "medium" as const,
+    timeoutMs: 9_000,
+  },
+  {
+    id: "reflection/beam-free",
+    reasoning: "medium" as const,
+    timeoutMs: 9_000,
   },
 ] as const;
 
@@ -78,10 +86,12 @@ export async function generateGatewayPlan(
         ),
         maxOutputTokens: 4096,
         model: gatewayLanguageModel(profile.id),
-        output: Output.json({
+        maxRetries: 0,
+        output: Output.object({
           description:
             "A JSON object containing a sequential assignment plan with 4 to 8 tasks.",
           name: "assignment_plan",
+          schema: gatewayPlanSchema,
         }),
         prompt: buildPrompt(assignment),
         reasoning: profile.reasoning,

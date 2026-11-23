@@ -17,6 +17,7 @@ import type { Assignment } from "@/features/pacepal/model";
 import type { RefinementOutput } from "@/features/pacepal/refinement";
 import {
   coerceGatewayRefinementContext,
+  gatewayRefinementDecisionSchema,
   refinementQualityIssues,
 } from "@/features/pacepal/refinement-quality";
 
@@ -105,11 +106,13 @@ export async function generateGatewayRefinement(
           Math.min(profile.timeoutMs, remainingTime - 1_000),
         ),
         maxOutputTokens: 6000,
+        maxRetries: 0,
         model: refinementModel(profile.id),
-        output: Output.json({
+        output: Output.object({
           description:
             "A JSON object containing the user's task-plan interpretation, a conversational change summary, and local operations.",
           name: "task_plan_refinement",
+          schema: gatewayRefinementDecisionSchema,
         }),
         prompt: [
           "Interpret the user's latest message in context, then update the task plan rather than merely chatting about it.",

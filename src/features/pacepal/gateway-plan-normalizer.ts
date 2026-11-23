@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const taskRecordSchema = z.record(z.string(), z.unknown());
 
-const validatedPlanSchema = z.object({
+export const gatewayPlanSchema = z.object({
   tasks: z
     .array(
       z.object({
@@ -89,7 +89,7 @@ function findTasks(value: unknown): unknown[] {
 }
 
 export function normalizeGatewayPlan(value: unknown) {
-  return validatedPlanSchema.parse({
+  return gatewayPlanSchema.parse({
     tasks: findTasks(value)
       .slice(0, 12)
       .map((item) => {

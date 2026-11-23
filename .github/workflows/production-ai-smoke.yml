@@ -67,7 +67,8 @@ jobs:
               .fallback == false and
               (.model == "google/gemini-3.8-flash" or
                 .model == "reflection/beam-free" or
-                .model == "nvidia/nemotron-3.5-lightning-free") and
+                .model == "nvidia/nemotron-3.5-lightning-free" or
+                .model == "recursive/flint-v1.0") and
               (.subtasks | length >= 4)
             ' <<<"$response" >/dev/null; then
               sleep 10
@@ -106,7 +107,8 @@ jobs:
               .fallback == false and
               (.model == "google/gemini-3.8-flash" or
                 .model == "reflection/beam-free" or
-                .model == "nvidia/nemotron-3.5-lightning-free") and
+                .model == "nvidia/nemotron-3.5-lightning-free" or
+                .model == "recursive/flint-v1.0") and
               (.operations | any(
                 .type == "add_task" or
                 .type == "update_task" or
@@ -184,12 +186,15 @@ jobs:
           vague="$(probe \
             '原计划合理时的模糊请求' \
             '重新平衡后续任务')"
+          sleep 8
           explicit="$(probe \
             '明确要求改变顺序' \
             '我已经有足够资料可以开始构思。请先写论文大纲，再补充核实史料，然后写初稿，并据此真正调整任务顺序和依赖关系。')"
+          sleep 8
           blocked="$(probe \
             '关键任务受阻后的主动调整' \
             '查找基础史料卡住了，明天才能拿到档案。今天有 120 分钟，请先安排不依赖档案、现在就能推进的工作。')"
+          sleep 8
           remaining="$(probe \
             '混合语言的实际剩余范围' \
             '我已经完成选题、sources、outline 和 first draft。现在只剩 polish / format check 和 final submission review，其他都做完了，请按实际进度调整。')"
