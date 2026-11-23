@@ -104,7 +104,7 @@ test("creates, approves, schedules, and persists an assignment", async ({
     page.getByText(/我理解为.*“理解任务要求”.*已经完成/),
   ).toBeVisible();
   await expect(
-    page.getByText(/我已更新这 1 项的状态.*重新安排尚未完成的任务/),
+    page.getByText(/我已将.*“理解任务要求”.*标记为完成.*重新计算后续安排/),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "安排" }).click();
