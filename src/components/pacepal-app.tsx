@@ -1,7 +1,7 @@
 "use client";
 
 import type { User } from "@supabase/supabase-js";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   loadCloudState,
@@ -47,6 +47,11 @@ type DashboardView = "overview" | "tasks" | "schedule";
 type TaskAdjustmentMode = "ai" | "manual" | null;
 type SyncStatus = "local" | "loading" | "saving" | "synced" | "error";
 type FormErrors = Partial<Record<keyof AssignmentInput, string>>;
+type TaskSelection = { assignmentId: string; subtaskId: string };
+type TodayPlanDraftItem = TaskSelection & {
+  blockId: string;
+  durationMinutes: number;
+};
 
 const emptyForm: AssignmentInput = {
   title: "",
@@ -122,6 +127,22 @@ function greetingText() {
   if (hour < 11) return "早上好";
   if (hour < 18) return "下午好";
   return "晚上好";
+}
+
+function addMinutesToTime(value: string, minutes: number) {
+  const [hours, initialMinutes] = value.split(":").map(Number);
+  const total = hours * 60 + initialMinutes + minutes;
+  return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function formatElapsedTime(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
 }
 
 function settleActiveTime(task: Subtask, now = new Date()): Subtask {
@@ -200,9 +221,30 @@ export function PacePalApp() {
   const [chatBusy, setChatBusy] = useState(false);
   const [taskAdjustmentMode, setTaskAdjustmentMode] =
     useState<TaskAdjustmentMode>("ai");
-  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
-  const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
+  const draggedTaskIdRef = useRef<string | null>(null);
+  const [manualRecommendation, setManualRecommendation] =
+    useState<TaskSelection | null>(null);
+  const [recommendationPickerOpen, setRecommendationPickerOpen] =
+    useState(false);
+  const [clockTick, setClockTick] = useState(() => Date.now());
+  const [todayPlanEditing, setTodayPlanEditing] = useState(false);
+  const [todayPlanDraft, setTodayPlanDraft] = useState<TodayPlanDraftItem[]>(
+    [],
+  );
   const userId = user?.id ?? null;
+
+  const hasRunningTask = appState.assignments.some((item) =>
+    item.subtasks.some(
+      (subtask) =>
+        subtask.status === "in_progress" && Boolean(subtask.activeSince),
+    ),
+  );
+
+  useEffect(() => {
+    if (!hasRunningTask) return;
+    const timer = window.setInterval(() => setClockTick(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [hasRunningTask]);
 
   useEffect(() => {
     let cancelled = false;
@@ -627,7 +669,7 @@ export function PacePalApp() {
       subtasks: normalizeOrder ? normalizeDependencies(subtasks) : subtasks,
     };
     return current.status === "scheduled"
-      ? rebuildAssignmentSchedule(adjusted, "手动调整已应用，安排已重算")
+      ? rebuildAssignmentSchedule(adjusted, "")
       : adjusted;
   }
 
@@ -692,8 +734,6 @@ export function PacePalApp() {
       reordered.splice(targetIndex, 0, moved);
       return applyManualSubtasks(current, reordered);
     });
-    setDraggedTaskId(null);
-    setDragOverTaskId(null);
   }
 
   function approvePlan() {
@@ -764,12 +804,15 @@ export function PacePalApp() {
   }
 
   function startTask(id: string, assignmentId = assignment?.id) {
+    if (!assignmentId) return;
     const now = new Date();
-    updateAssignment(
-      (current) => ({
-        ...current,
-        subtasks: current.subtasks.map((subtask) => {
-          if (subtask.id === id) {
+    setClockTick(now.getTime());
+    setAppState((current) => ({
+      ...current,
+      assignments: current.assignments.map((item) => ({
+        ...item,
+        subtasks: item.subtasks.map((subtask) => {
+          if (item.id === assignmentId && subtask.id === id) {
             return {
               ...subtask,
               activeSince: now.toISOString(),
@@ -781,9 +824,8 @@ export function PacePalApp() {
             ? { ...settleActiveTime(subtask, now), status: "paused" }
             : subtask;
         }),
-      }),
-      assignmentId,
-    );
+      })),
+    }));
   }
 
   function pauseTask(id: string, assignmentId = assignment?.id) {
@@ -875,10 +917,113 @@ export function PacePalApp() {
   }
 
   function updateCheckIn(patch: Partial<Assignment["checkIn"]>) {
-    updateAssignment((current) => ({
+    setAppState((current) => ({
       ...current,
-      checkIn: { ...current.checkIn, ...patch },
+      assignments: current.assignments.map((item) => ({
+        ...item,
+        checkIn: { ...item.checkIn, ...patch },
+      })),
     }));
+    setManualRecommendation(null);
+  }
+
+  function openTodayPlanEditor() {
+    setTodayPlanDraft(
+      todayBlocks.map(({ assignment: item, block }) => ({
+        assignmentId: item.id,
+        blockId: block.id,
+        durationMinutes: block.durationMinutes,
+        subtaskId: block.subtaskId,
+      })),
+    );
+    setTodayPlanEditing(true);
+  }
+
+  function addTodayPlanTask(value: string) {
+    const [assignmentId, subtaskId] = value.split("::");
+    if (!assignmentId || !subtaskId) return;
+    const targetAssignment = assignments.find(
+      (item) => item.id === assignmentId,
+    );
+    const targetTask = targetAssignment?.subtasks.find(
+      (subtask) => subtask.id === subtaskId,
+    );
+    if (!targetTask) return;
+    setTodayPlanDraft((current) =>
+      current.some(
+        (item) =>
+          item.assignmentId === assignmentId && item.subtaskId === subtaskId,
+      )
+        ? current
+        : [
+            ...current,
+            {
+              assignmentId,
+              blockId: createId("block"),
+              durationMinutes: Math.min(targetTask.estimatedMinutes, 60),
+              subtaskId,
+            },
+          ],
+    );
+  }
+
+  function moveTodayPlanItem(index: number, direction: -1 | 1) {
+    setTodayPlanDraft((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const reordered = [...current];
+      [reordered[index], reordered[target]] = [
+        reordered[target],
+        reordered[index],
+      ];
+      return reordered;
+    });
+  }
+
+  function saveTodayPlan() {
+    const today = currentDateKey();
+    const firstStart =
+      todayBlocks[0]?.block.startTime ??
+      assignment?.availability.preferredTime ??
+      "18:00";
+    let elapsedMinutes = 0;
+    const normalized = todayPlanDraft.map((item) => {
+      const block = {
+        ...item,
+        date: today,
+        durationMinutes: Math.max(5, item.durationMinutes),
+        locked: true,
+        startTime: addMinutesToTime(firstStart, elapsedMinutes),
+      };
+      elapsedMinutes += block.durationMinutes;
+      return block;
+    });
+
+    setAppState((current) => ({
+      ...current,
+      assignments: current.assignments.map((item) => ({
+        ...item,
+        schedule: [
+          ...item.schedule.filter((block) => block.date !== today),
+          ...normalized
+            .filter((block) => block.assignmentId === item.id)
+            .map((block) => ({
+              date: block.date,
+              durationMinutes: block.durationMinutes,
+              id: block.blockId,
+              locked: block.locked,
+              startTime: block.startTime,
+              subtaskId: block.subtaskId,
+            })),
+        ].sort(
+          (left, right) =>
+            left.date.localeCompare(right.date) ||
+            left.startTime.localeCompare(right.startTime),
+        ),
+        scheduleNotice: "",
+      })),
+    }));
+    setTodayPlanEditing(false);
   }
 
   function toggleBlockLock(id: string) {
@@ -1548,14 +1693,28 @@ export function PacePalApp() {
     );
   }
 
-  const nextBlock =
-    assignment.schedule.find(
-      (block) =>
-        block.date >= currentDateKey() &&
-        taskById.get(block.subtaskId)?.status !== "completed",
-    ) ?? null;
-  const recommendedTask = recommendation?.task ?? null;
-  const recommendedAssignment = recommendation?.assignment ?? assignment;
+  const manualRecommendedAssignment = manualRecommendation
+    ? assignments.find((item) => item.id === manualRecommendation.assignmentId)
+    : null;
+  const manualRecommendedTask = manualRecommendedAssignment?.subtasks.find(
+    (task) =>
+      task.id === manualRecommendation?.subtaskId &&
+      task.status !== "completed",
+  );
+  const recommendedTask = manualRecommendedTask ?? recommendation?.task ?? null;
+  const recommendedAssignment =
+    (manualRecommendedTask ? manualRecommendedAssignment : null) ??
+    recommendation?.assignment ??
+    assignment;
+  const recommendationReasons = manualRecommendedTask
+    ? ["手动选择", "按你的决定开始"]
+    : (recommendation?.reasons ?? []);
+  const recommendedMinutes = recommendedTask
+    ? Math.min(
+        recommendedTask.estimatedMinutes,
+        assignment.checkIn.availableMinutes,
+      )
+    : 0;
   const recommendedBlock = recommendedTask
     ? (recommendedAssignment.schedule.find(
         (block) =>
@@ -1567,14 +1726,6 @@ export function PacePalApp() {
     assignment.unscheduledMinutes,
     deadlineRisk?.shortfallMinutes ?? 0,
   );
-  const activeTask = assignment.subtasks.find(
-    (task) => task.status === "in_progress",
-  );
-  const reminder = activeTask
-    ? `正在进行：${activeTask.title}`
-    : nextBlock?.date === currentDateKey()
-      ? `今天还有 ${nextBlock.durationMinutes} 分钟计划`
-      : "";
   const remainingMinutes = assignment.subtasks
     .filter((task) => task.status !== "completed")
     .reduce((total, task) => total + task.estimatedMinutes, 0);
@@ -1597,6 +1748,65 @@ export function PacePalApp() {
   const allRemainingMinutes = allSubtasks
     .filter((task) => task.status !== "completed")
     .reduce((total, task) => total + task.estimatedMinutes, 0);
+  const pendingAssignments = assignments.filter((item) =>
+    item.subtasks.some((task) => task.status !== "completed"),
+  );
+  const pendingTaskOptions = assignments.flatMap((item) =>
+    item.subtasks
+      .filter(
+        (task) => task.status !== "completed" && task.status !== "blocked",
+      )
+      .map((task) => ({ assignment: item, task })),
+  );
+  const recommendedElapsedSeconds = recommendedTask
+    ? recommendedTask.actualMinutes * 60 +
+      (recommendedTask.activeSince
+        ? Math.max(
+            0,
+            Math.floor(
+              (clockTick - new Date(recommendedTask.activeSince).getTime()) /
+                1_000,
+            ),
+          )
+        : 0)
+    : 0;
+  const todayScheduledSeconds = todayBlocks.reduce(
+    (total, { block }) => total + block.durationMinutes * 60,
+    0,
+  );
+  const todayWorkedSeconds = todayBlocks.reduce(
+    (total, { assignment: item, block }) => {
+      const task = item.subtasks.find(
+        (subtask) => subtask.id === block.subtaskId,
+      );
+      if (!task) return total;
+      if (task.status === "completed") {
+        return total + block.durationMinutes * 60;
+      }
+      const liveSeconds = task.activeSince
+        ? Math.max(
+            0,
+            Math.floor(
+              (clockTick - new Date(task.activeSince).getTime()) / 1_000,
+            ),
+          )
+        : 0;
+      return (
+        total +
+        Math.min(
+          block.durationMinutes * 60,
+          task.actualMinutes * 60 + liveSeconds,
+        )
+      );
+    },
+    0,
+  );
+  const todayProgress = todayScheduledSeconds
+    ? Math.min(
+        100,
+        Math.round((todayWorkedSeconds / todayScheduledSeconds) * 100),
+      )
+    : 0;
   const viewTitles: Record<DashboardView, string> = {
     overview: "今日重点",
     schedule: "安排",
@@ -1670,7 +1880,7 @@ export function PacePalApp() {
           </div>
         </div>
 
-        {assignment.scheduleNotice ? (
+        {assignment.scheduleNotice && dashboardView !== "overview" ? (
           <p
             className="mb-4 rounded-xl border border-violet-100 bg-violet-50 px-4 py-3 font-medium text-violet-950"
             role="status"
@@ -1690,61 +1900,79 @@ export function PacePalApp() {
 
         {dashboardView === "overview" ? (
           <section className="space-y-5">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="rounded-2xl bg-[#5b55df] p-5 text-white shadow-[0_16px_36px_rgba(91,85,223,0.22)]">
-                <p className="text-sm font-semibold text-violet-100">
-                  总体进度
-                </p>
-                <div className="mt-3 flex items-end justify-between gap-4">
-                  <span className="text-4xl font-semibold tracking-[-0.05em]">
-                    {allSubtasks.length
-                      ? Math.round(
-                          (allCompletedCount / allSubtasks.length) * 100,
-                        )
-                      : 0}
-                    %
-                  </span>
-                  <span className="text-sm font-medium text-violet-100">
-                    {allCompletedCount}/{allSubtasks.length}
-                  </span>
-                </div>
-                <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/20">
-                  <div
-                    aria-label="总体完成进度"
-                    className="h-full rounded-full bg-white transition-[width]"
-                    style={{
-                      width: `${allSubtasks.length ? Math.round((allCompletedCount / allSubtasks.length) * 100) : 0}%`,
-                    }}
-                  />
-                </div>
-              </div>
-              <div className={`${surfaceClassName} p-5`}>
-                <p className="text-sm font-semibold text-slate-500">进行中</p>
-                <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
-                  {assignments.length} 个
-                </p>
-                <p className="mt-2 text-sm font-medium text-slate-500">
-                  主任务
-                </p>
-              </div>
-              <div className={`${surfaceClassName} p-5`}>
-                <p className="text-sm font-semibold text-slate-500">剩余工作</p>
-                <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
+            <section className={`${surfaceClassName} overflow-hidden`}>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
+                <h2 className="text-lg font-semibold text-slate-950">
+                  待完成任务
+                </h2>
+                <span className="text-sm font-semibold text-slate-500">
                   {allRemainingMinutes} 分钟
-                </p>
-                <p className="mt-2 text-sm font-medium text-slate-500">
-                  {allSubtasks.length - allCompletedCount} 个子任务
-                </p>
+                </span>
               </div>
-            </div>
+              <div className="divide-y divide-slate-100">
+                {pendingAssignments.map((item) => {
+                  const done = item.subtasks.filter(
+                    (task) => task.status === "completed",
+                  ).length;
+                  const progress = item.subtasks.length
+                    ? Math.round((done / item.subtasks.length) * 100)
+                    : 0;
+                  const priorityLabel =
+                    item.priority === "high"
+                      ? "高优先级"
+                      : item.priority === "low"
+                        ? "低优先级"
+                        : "中优先级";
+                  return (
+                    <button
+                      className="grid w-full gap-4 px-5 py-5 text-left transition hover:bg-slate-50 focus:bg-violet-50 focus:outline-none sm:grid-cols-[minmax(0,1fr)_auto_15rem] sm:items-center sm:px-6"
+                      key={item.id}
+                      onClick={() => selectAssignment(item.id, "tasks")}
+                      type="button"
+                    >
+                      <span className="min-w-0">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-base font-semibold text-slate-950">
+                            {item.title}
+                          </span>
+                          <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                            {priorityLabel}
+                          </span>
+                        </span>
+                        <span className="mt-1.5 block truncate text-sm font-medium text-slate-500">
+                          {item.deliverable}
+                        </span>
+                      </span>
+                      <span className="text-sm font-semibold text-slate-500">
+                        截止 {formatDate(item.deadline)}
+                      </span>
+                      <span className="flex items-center gap-3">
+                        <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                          <span
+                            aria-label={`${item.title}完成进度`}
+                            className="block h-full rounded-full bg-[#5b55df] transition-[width]"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </span>
+                        <span className="w-10 text-right text-sm font-semibold text-slate-500">
+                          {progress}%
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
 
-            <div className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]">
-              {recommendedTask && recommendation ? (
-                <div className={`${surfaceClassName} overflow-hidden`}>
+            <section
+              className={`${surfaceClassName} grid overflow-hidden lg:grid-cols-[1.35fr_0.65fr]`}
+            >
+              {recommendedTask ? (
+                <div className="overflow-hidden">
                   <div className="border-b border-slate-100 px-6 py-5 sm:px-7">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <h2 className="text-lg font-semibold text-slate-950">
-                        下一步
+                        当前推荐
                       </h2>
                       <div className="flex items-center gap-2 text-sm font-semibold text-violet-600">
                         <span>{statusLabels[recommendedTask.status]}</span>
@@ -1752,9 +1980,10 @@ export function PacePalApp() {
                           ·
                         </span>
                         <span>
-                          {recommendation.isPartial
-                            ? `先做 ${recommendation.suggestedMinutes} 分钟`
-                            : `${recommendation.suggestedMinutes} 分钟`}
+                          {recommendedTask.estimatedMinutes >
+                          assignment.checkIn.availableMinutes
+                            ? `先做 ${recommendedMinutes} 分钟`
+                            : `${recommendedMinutes} 分钟`}
                         </span>
                       </div>
                     </div>
@@ -1773,7 +2002,7 @@ export function PacePalApp() {
                       {recommendedAssignment.title}
                     </button>
                     <div className="mt-4 flex flex-wrap gap-2">
-                      {recommendation.reasons.map((reason) => (
+                      {recommendationReasons.map((reason) => (
                         <span
                           className="rounded-full bg-violet-50 px-3 py-1.5 text-sm font-semibold text-violet-700"
                           key={reason}
@@ -1790,6 +2019,17 @@ export function PacePalApp() {
                         {formatScheduleDate(recommendedBlock.date)} ·{" "}
                         {recommendedBlock.startTime}
                       </p>
+                    ) : null}
+                    {recommendedTask.status === "in_progress" ? (
+                      <div className="mt-6 inline-flex items-center gap-3 rounded-xl bg-slate-950 px-4 py-3 text-white">
+                        <span className="size-2 animate-pulse rounded-full bg-emerald-400" />
+                        <span className="font-mono text-lg font-semibold tracking-wide">
+                          {formatElapsedTime(recommendedElapsedSeconds)}
+                        </span>
+                        <span className="text-sm font-medium text-slate-300">
+                          已进行
+                        </span>
+                      </div>
                     ) : null}
                     <div className="mt-8 flex flex-wrap gap-2">
                       {recommendedTask.status === "in_progress" ? (
@@ -1857,11 +2097,57 @@ export function PacePalApp() {
                       >
                         卡住了
                       </button>
+                      <button
+                        className={textButtonClassName}
+                        onClick={() =>
+                          setRecommendationPickerOpen((open) => !open)
+                        }
+                        type="button"
+                      >
+                        手动选择
+                      </button>
                     </div>
+                    {recommendationPickerOpen ? (
+                      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <label
+                          className="text-sm font-semibold text-slate-600"
+                          htmlFor="manual-recommendation"
+                        >
+                          选择子任务
+                        </label>
+                        <select
+                          className={fieldClassName}
+                          id="manual-recommendation"
+                          onChange={(event) => {
+                            const [assignmentId, subtaskId] =
+                              event.target.value.split("::");
+                            if (!assignmentId || !subtaskId) return;
+                            setManualRecommendation({
+                              assignmentId,
+                              subtaskId,
+                            });
+                            setRecommendationPickerOpen(false);
+                          }}
+                          value=""
+                        >
+                          <option value="">选择一个待完成子任务</option>
+                          {pendingTaskOptions.map(
+                            ({ assignment: item, task }) => (
+                              <option
+                                key={`${item.id}-${task.id}`}
+                                value={`${item.id}::${task.id}`}
+                              >
+                                {item.title} · {task.title}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ) : (
-                <div className={`${surfaceClassName} p-7`}>
+                <div className="p-7">
                   <h2 className="text-xl font-semibold text-slate-950">
                     {completedCount === assignment.subtasks.length
                       ? "当前计划已完成"
@@ -1882,9 +2168,9 @@ export function PacePalApp() {
                 </div>
               )}
 
-              <div className={`${surfaceClassName} p-5 sm:p-6`}>
+              <div className="border-t border-slate-100 p-5 sm:p-6 lg:border-t-0 lg:border-l">
                 <h2 className="text-lg font-semibold text-slate-950">
-                  此刻状态
+                  此刻可用时间 / 精力状态
                 </h2>
                 <div className="mt-5 space-y-4">
                   <FormField label="可用时间">
@@ -1919,84 +2205,206 @@ export function PacePalApp() {
                     </select>
                   </FormField>
                 </div>
-                {reminder ? (
-                  <p className="mt-5 border-t border-slate-100 pt-4 font-medium text-slate-600">
-                    {reminder}
-                  </p>
-                ) : null}
               </div>
-            </div>
+            </section>
 
-            <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-              <div className={`${surfaceClassName} p-5 sm:p-6`}>
-                <div className="flex items-center justify-between gap-4">
-                  <h2 className="text-lg font-semibold text-slate-950">
-                    今日安排
-                  </h2>
+            <section className={`${surfaceClassName} p-5 sm:p-6`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-slate-950">
+                  今日计划
+                </h2>
+                {todayPlanEditing ? (
+                  <div className="flex gap-2">
+                    <button
+                      className={textButtonClassName}
+                      onClick={() => setTodayPlanEditing(false)}
+                      type="button"
+                    >
+                      取消
+                    </button>
+                    <button
+                      className={primaryButtonClassName}
+                      onClick={saveTodayPlan}
+                      type="button"
+                    >
+                      保存今日计划
+                    </button>
+                  </div>
+                ) : (
                   <button
-                    className={textButtonClassName}
-                    onClick={() => setDashboardView("schedule")}
+                    className={secondaryButtonClassName}
+                    onClick={openTodayPlanEditor}
                     type="button"
                   >
-                    查看全部
+                    手动调整今日计划
                   </button>
-                </div>
-                <ul className="mt-4 divide-y divide-slate-100">
-                  {(todayBlocks.length > 0
-                    ? todayBlocks
-                    : globalSchedule.slice(0, 3)
-                  ).map(({ assignment: item, block }) => (
-                    <li
-                      className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-3 py-3.5"
-                      key={`${item.id}-${block.id}`}
-                    >
-                      <span className="text-sm font-semibold text-slate-500">
-                        {block.startTime}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate font-semibold text-slate-800">
-                          {item.subtasks.find(
-                            (task) => task.id === block.subtaskId,
-                          )?.title ?? "任务"}
-                        </span>
-                        <span className="block truncate text-sm font-medium text-slate-400">
-                          {item.title}
-                        </span>
-                      </span>
-                      <span className="text-sm font-medium text-slate-400">
-                        {block.durationMinutes} 分钟
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                {globalSchedule.length === 0 ? (
-                  <p className="mt-4 text-slate-500">当前没有待安排任务。</p>
-                ) : null}
+                )}
               </div>
 
-              <div className="rounded-2xl bg-slate-950 p-6 text-white shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
-                <div className="flex size-11 items-center justify-center rounded-xl bg-violet-500 text-lg font-bold">
-                  AI
+              {todayPlanEditing ? (
+                <div className="mt-5">
+                  <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                    {todayPlanDraft.map((draft, index) => {
+                      const item = assignments.find(
+                        (candidate) => candidate.id === draft.assignmentId,
+                      );
+                      const task = item?.subtasks.find(
+                        (candidate) => candidate.id === draft.subtaskId,
+                      );
+                      if (!item || !task) return null;
+                      return (
+                        <li
+                          className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_8rem_auto] sm:items-center"
+                          key={draft.blockId}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-semibold text-slate-900">
+                              {task.title}
+                            </span>
+                            <span className="mt-1 block truncate text-sm font-medium text-slate-500">
+                              {item.title}
+                            </span>
+                          </span>
+                          <label className="flex items-center gap-2 text-sm font-medium text-slate-500">
+                            <input
+                              aria-label={`${task.title}今日计划分钟`}
+                              className="w-20 rounded-lg border border-slate-200 px-3 py-2 text-right text-slate-900 outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10"
+                              min={5}
+                              onChange={(event) => {
+                                const durationMinutes = Math.max(
+                                  5,
+                                  Number(event.target.value) || 5,
+                                );
+                                setTodayPlanDraft((current) =>
+                                  current.map((entry) =>
+                                    entry.blockId === draft.blockId
+                                      ? { ...entry, durationMinutes }
+                                      : entry,
+                                  ),
+                                );
+                              }}
+                              step={5}
+                              type="number"
+                              value={draft.durationMinutes}
+                            />
+                            分钟
+                          </label>
+                          <span className="flex items-center justify-end gap-1">
+                            <button
+                              aria-label={`上移 ${task.title}`}
+                              className={textButtonClassName}
+                              disabled={index === 0}
+                              onClick={() => moveTodayPlanItem(index, -1)}
+                              type="button"
+                            >
+                              上移
+                            </button>
+                            <button
+                              aria-label={`下移 ${task.title}`}
+                              className={textButtonClassName}
+                              disabled={index === todayPlanDraft.length - 1}
+                              onClick={() => moveTodayPlanItem(index, 1)}
+                              type="button"
+                            >
+                              下移
+                            </button>
+                            <button
+                              aria-label={`移出今日计划 ${task.title}`}
+                              className={textButtonClassName}
+                              onClick={() =>
+                                setTodayPlanDraft((current) =>
+                                  current.filter(
+                                    (entry) => entry.blockId !== draft.blockId,
+                                  ),
+                                )
+                              }
+                              type="button"
+                            >
+                              移出
+                            </button>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <label
+                    className="mt-4 block text-sm font-semibold text-slate-600"
+                    htmlFor="add-today-task"
+                  >
+                    添加子任务
+                  </label>
+                  <select
+                    className={fieldClassName}
+                    id="add-today-task"
+                    onChange={(event) => {
+                      addTodayPlanTask(event.target.value);
+                      event.target.value = "";
+                    }}
+                    defaultValue=""
+                  >
+                    <option value="">选择待完成子任务</option>
+                    {pendingTaskOptions.map(({ assignment: item, task }) => (
+                      <option
+                        key={`${item.id}-${task.id}`}
+                        value={`${item.id}::${task.id}`}
+                      >
+                        {item.title} · {task.title}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <h2 className="mt-6 text-xl font-semibold tracking-[-0.02em]">
-                  和 PacePal 调整计划
-                </h2>
-                <p className="mt-3 leading-7 text-slate-300">
-                  {assignment.chatMessages.at(-1)?.content ??
-                    "拆分任务、调整时间或重新安排优先顺序。"}
-                </p>
-                <button
-                  className="mt-7 inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-2.5 font-semibold text-slate-950 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-400/30 focus:outline-none"
-                  onClick={() => {
-                    setDashboardView("tasks");
-                    setTaskAdjustmentMode("ai");
-                  }}
-                  type="button"
-                >
-                  打开 AI 调整
-                </button>
-              </div>
-            </div>
+              ) : (
+                <>
+                  <ul className="mt-4 divide-y divide-slate-100">
+                    {todayBlocks.map(({ assignment: item, block }) => (
+                      <li
+                        className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 py-3.5"
+                        key={`${item.id}-${block.id}`}
+                      >
+                        <span className="text-sm font-semibold text-slate-500">
+                          {block.startTime}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate font-semibold text-slate-800">
+                            {item.subtasks.find(
+                              (task) => task.id === block.subtaskId,
+                            )?.title ?? "任务"}
+                          </span>
+                          <span className="block truncate text-sm font-medium text-slate-400">
+                            {item.title}
+                          </span>
+                        </span>
+                        <span className="text-sm font-medium text-slate-400">
+                          {block.durationMinutes} 分钟
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {todayBlocks.length === 0 ? (
+                    <p className="mt-5 text-slate-500">今天还没有安排任务。</p>
+                  ) : null}
+                  <div className="mt-6 border-t border-slate-100 pt-5">
+                    <div className="flex items-center justify-between gap-4 text-sm font-semibold">
+                      <span className="text-slate-600">今日任务进度</span>
+                      <span className="text-violet-700">{todayProgress}%</span>
+                    </div>
+                    <div
+                      aria-label="今日任务进度"
+                      aria-valuemax={100}
+                      aria-valuemin={0}
+                      aria-valuenow={todayProgress}
+                      className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100"
+                      role="progressbar"
+                    >
+                      <div
+                        className="h-full rounded-full bg-[#5b55df] transition-[width]"
+                        style={{ width: `${todayProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+            </section>
           </section>
         ) : null}
 
@@ -2101,21 +2509,23 @@ export function PacePalApp() {
                       <ManualSubtaskRow
                         canDelete={assignment.subtasks.length > 1}
                         index={index}
-                        isDragOver={dragOverTaskId === subtask.id}
                         key={subtask.id}
                         onChange={(patch) =>
                           updateManualSubtask(subtask.id, patch)
                         }
                         onDelete={() => deleteManualSubtask(subtask.id)}
                         onDragEnd={() => {
-                          setDraggedTaskId(null);
-                          setDragOverTaskId(null);
+                          draggedTaskIdRef.current = null;
                         }}
-                        onDragEnter={() => setDragOverTaskId(subtask.id)}
-                        onDragStart={() => setDraggedTaskId(subtask.id)}
-                        onDrop={() => {
-                          if (draggedTaskId) {
-                            reorderManualSubtasks(draggedTaskId, subtask.id);
+                        onDragStart={() => {
+                          draggedTaskIdRef.current = subtask.id;
+                        }}
+                        onDrop={(sourceId) => {
+                          const resolvedSourceId =
+                            sourceId || draggedTaskIdRef.current;
+                          draggedTaskIdRef.current = null;
+                          if (resolvedSourceId) {
+                            reorderManualSubtasks(resolvedSourceId, subtask.id);
                           }
                         }}
                         onToggleCompleted={() => toggleCompleted(subtask.id)}
@@ -2588,11 +2998,9 @@ function FormField({
 function ManualSubtaskRow({
   canDelete,
   index,
-  isDragOver,
   onChange,
   onDelete,
   onDragEnd,
-  onDragEnter,
   onDragStart,
   onDrop,
   onToggleCompleted,
@@ -2600,13 +3008,11 @@ function ManualSubtaskRow({
 }: {
   canDelete: boolean;
   index: number;
-  isDragOver: boolean;
   onChange: (patch: Partial<Subtask>) => void;
   onDelete: () => void;
   onDragEnd: () => void;
-  onDragEnter: () => void;
   onDragStart: () => void;
-  onDrop: () => void;
+  onDrop: (sourceId: string) => void;
   onToggleCompleted: () => void;
   subtask: Subtask;
 }) {
@@ -2641,16 +3047,15 @@ function ManualSubtaskRow({
 
   return (
     <li
-      className={`px-4 py-4 transition sm:px-5 ${
-        isDragOver ? "bg-violet-50 ring-2 ring-violet-300 ring-inset" : ""
-      }`}
+      className="px-4 py-4 transition sm:px-5"
       data-testid={`manual-subtask-${subtask.id}`}
-      onDragEnter={onDragEnter}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault();
-        onDrop();
+        const sourceId = event.dataTransfer.getData("text/plain");
+        onDrop(sourceId);
       }}
+      onPointerUp={() => onDrop("")}
     >
       <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]">
         <button
@@ -2663,6 +3068,7 @@ function ManualSubtaskRow({
             event.dataTransfer.setData("text/plain", subtask.id);
             onDragStart();
           }}
+          onPointerDown={onDragStart}
           type="button"
         >
           ⠿
