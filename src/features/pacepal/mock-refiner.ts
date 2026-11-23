@@ -73,8 +73,10 @@ function authoritativeRemainingRefinement(
   let previousId: string | null = null;
 
   for (const phrase of phrases) {
-    const matched = findTaskForPhrase(assignment, phrase, true);
-    if (matched && !remainingIds.includes(matched.id)) {
+    const matched = findReferencedTasks(assignment, phrase, true).find(
+      (task) => !remainingIds.includes(task.id),
+    );
+    if (matched) {
       remainingIds.push(matched.id);
       remainingTitles.push(matched.title);
       previousId = matched.id;

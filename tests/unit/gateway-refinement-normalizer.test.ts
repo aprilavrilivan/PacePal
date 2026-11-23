@@ -118,9 +118,8 @@ describe("gateway refinement normalization", () => {
       "Research 卡住了，今天先做其他工作。",
     );
 
-    expect(output.assistantMessage).toBe(
-      "已将“Research”标记为卡住，并重新安排其他可执行任务。",
-    );
+    expect(output.assistantMessage).toContain("我理解为“Research”目前遇到阻塞");
+    expect(output.assistantMessage).toContain("重新安排其他可执行任务");
     expect(output.operations).toEqual([
       { status: "blocked", taskId: "research", type: "set_status" },
       { type: "reschedule" },
@@ -157,9 +156,8 @@ describe("gateway refinement normalization", () => {
       "我已经有足够资料，请先写论文大纲，再核实史料。",
     );
 
-    expect(output.assistantMessage).toBe(
-      "已调整任务顺序和依赖关系，并重新计算后续日程。",
-    );
+    expect(output.assistantMessage).toContain("先做“论文大纲”");
+    expect(output.assistantMessage).toContain("再做“核实史料”");
     expect(output.operations).toEqual([
       {
         patch: { dependencies: [] },
@@ -172,6 +170,92 @@ describe("gateway refinement normalization", () => {
       },
       { type: "reschedule" },
     ]);
+  });
+
+  it("adds a real reorder when the model understood the request but omitted operations", () => {
+    const multiTaskAssignment: Assignment = {
+      ...assignment,
+      subtasks: [
+        { ...assignment.subtasks[0], id: "sources", title: "核实史料" },
+        {
+          ...assignment.subtasks[0],
+          dependencies: ["sources"],
+          id: "outline",
+          title: "论文大纲",
+        },
+        {
+          ...assignment.subtasks[0],
+          dependencies: ["outline"],
+          id: "draft",
+          title: "论文初稿",
+        },
+      ],
+    };
+    const output = normalizeGatewayRefinement(
+      {
+        assistantMessage: "我明白你的顺序要求。",
+        changeSummary: "我会据此调整。",
+        needsClarification: false,
+        operations: [{ type: "reschedule" }],
+        understanding: "先写大纲，再核实史料。",
+      },
+      multiTaskAssignment,
+      "我已有足够资料，请先写论文大纲，再核实史料，然后写初稿。",
+    );
+
+    expect(output.operations).toEqual([
+      {
+        patch: { dependencies: [] },
+        taskId: "outline",
+        type: "update_task",
+      },
+      {
+        taskIds: ["outline", "sources", "draft"],
+        type: "reorder_tasks",
+      },
+      { type: "reschedule" },
+    ]);
+    expect(output.assistantMessage).toContain("先做“论文大纲”");
+  });
+
+  it("reconciles an authoritative remaining scope even when model operations are incomplete", () => {
+    const multiTaskAssignment: Assignment = {
+      ...assignment,
+      subtasks: [
+        { ...assignment.subtasks[0], id: "topic", title: "确定选题" },
+        { ...assignment.subtasks[0], id: "sources", title: "查找资料" },
+        { ...assignment.subtasks[0], id: "outline", title: "撰写大纲" },
+        { ...assignment.subtasks[0], id: "draft", title: "撰写初稿" },
+        { ...assignment.subtasks[0], id: "polish", title: "润色与格式检查" },
+        { ...assignment.subtasks[0], id: "review", title: "最终提交前核对" },
+      ],
+    };
+    const output = normalizeGatewayRefinement(
+      {
+        assistantMessage: "已更新进度。",
+        operations: [
+          { type: "set_status", taskId: "topic", status: "completed" },
+        ],
+      },
+      multiTaskAssignment,
+      "我已经完成选题、sources、outline 和 first draft。现在只剩“polish / format check”和“final submission review”，其他都做完了，请按实际进度调整。",
+    );
+
+    const completedIds = output.operations.flatMap((operation) =>
+      operation.type === "set_status" && operation.status === "completed"
+        ? [operation.taskId]
+        : [],
+    );
+    expect(completedIds).toEqual(
+      expect.arrayContaining(["topic", "sources", "outline", "draft"]),
+    );
+    expect(output.operations).toContainEqual({
+      taskIds: ["polish", "review"],
+      type: "reorder_tasks",
+    });
+    expect(output.operations).toContainEqual({ type: "reschedule" });
+    expect(output.assistantMessage).toContain("现在只剩");
+    expect(output.assistantMessage.length).toBeGreaterThan(30);
   });
 
   it("does not claim a reorder when only the calendar was recalculated", () => {

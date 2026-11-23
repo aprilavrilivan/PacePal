@@ -6,6 +6,7 @@ import {
   type RefinementOperation,
   type RefinementOutput,
 } from "@/features/pacepal/refinement";
+import { generateMockRefinement } from "@/features/pacepal/mock-refiner";
 import { findReferencedTask } from "@/features/pacepal/refinement-intent";
 
 const recordSchema = z.record(z.string(), z.unknown());
@@ -444,6 +445,113 @@ function sanitizeOperationReferences(
   });
 }
 
+function normalizedTitle(value: string) {
+  return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
+}
+
+function mergeSemanticRepairs(
+  operations: RefinementOperation[],
+  repairs: RefinementOperation[],
+) {
+  const merged = [...operations];
+
+  for (const repair of repairs) {
+    if (repair.type === "reschedule") {
+      if (!merged.some((operation) => operation.type === "reschedule")) {
+        merged.push(repair);
+      }
+      continue;
+    }
+
+    if (repair.type === "reorder_tasks") {
+      for (let index = merged.length - 1; index >= 0; index -= 1) {
+        if (merged[index]?.type === "reorder_tasks") merged.splice(index, 1);
+      }
+      merged.push(repair);
+      continue;
+    }
+
+    if (repair.type === "set_status" || repair.type === "reopen_task") {
+      for (let index = merged.length - 1; index >= 0; index -= 1) {
+        const operation = merged[index];
+        if (
+          (operation?.type === "set_status" ||
+            operation?.type === "reopen_task") &&
+          operation.taskId === repair.taskId
+        ) {
+          merged.splice(index, 1);
+        }
+      }
+      merged.push(repair);
+      continue;
+    }
+
+    if (repair.type === "update_task") {
+      const existingIndex = merged.findIndex(
+        (operation) =>
+          operation.type === "update_task" &&
+          operation.taskId === repair.taskId,
+      );
+      const existing = merged[existingIndex];
+      if (existing?.type === "update_task") {
+        merged[existingIndex] = {
+          ...existing,
+          patch: { ...existing.patch, ...repair.patch },
+        };
+      } else {
+        merged.push(repair);
+      }
+      continue;
+    }
+
+    if (repair.type === "add_task") {
+      const duplicateIndex = merged.findIndex(
+        (operation) =>
+          operation.type === "add_task" &&
+          (operation.task.id === repair.task.id ||
+            normalizedTitle(operation.task.title) ===
+              normalizedTitle(repair.task.title)),
+      );
+      if (duplicateIndex >= 0) merged.splice(duplicateIndex, 1);
+      merged.push(repair);
+      continue;
+    }
+
+    if (repair.type === "remove_task") {
+      if (
+        !merged.some(
+          (operation) =>
+            operation.type === "remove_task" &&
+            operation.taskId === repair.taskId,
+        )
+      ) {
+        merged.push(repair);
+      }
+      continue;
+    }
+
+    if (repair.type === "set_availability") {
+      const existingIndex = merged.findIndex(
+        (operation) => operation.type === "set_availability",
+      );
+      const existing = merged[existingIndex];
+      if (existing?.type === "set_availability") {
+        merged[existingIndex] = {
+          type: "set_availability",
+          availability: {
+            ...existing.availability,
+            ...repair.availability,
+          },
+        };
+      } else {
+        merged.push(repair);
+      }
+    }
+  }
+
+  return merged;
+}
+
 export function normalizeGatewayRefinement(
   value: unknown,
   assignment: Assignment,
@@ -451,7 +559,7 @@ export function normalizeGatewayRefinement(
 ): RefinementOutput {
   const source = record(value);
   const rawOperations = valueFor(source, ["operations", "changes", "actions"]);
-  const operations = Array.isArray(rawOperations)
+  let operations = Array.isArray(rawOperations)
     ? rawOperations
         .map((operation) => directOperation(operation, assignment))
         .filter((operation): operation is RefinementOperation =>
@@ -475,6 +583,27 @@ export function normalizeGatewayRefinement(
       }
     }
   }
+
+  // The model remains responsible for understanding open-ended requests. For
+  // unambiguous progress, blocker, and ordering statements, supplement any
+  // omitted structured operations before validation so a good interpretation
+  // cannot degrade into a conversational no-op.
+  const semanticRepair = message
+    ? generateMockRefinement(assignment, message)
+    : null;
+  const operationsBeforeRepair = JSON.stringify(operations);
+  if (semanticRepair?.changed) {
+    operations = mergeSemanticRepairs(operations, semanticRepair.operations);
+  }
+  operations = [
+    ...operations.filter((operation) => operation.type !== "reschedule"),
+    ...operations
+      .filter((operation) => operation.type === "reschedule")
+      .slice(0, 1),
+  ];
+  const semanticRepairAddedOperations =
+    Boolean(semanticRepair?.changed) &&
+    JSON.stringify(operations) !== operationsBeforeRepair;
 
   const reportsBlocker = /(卡住|受阻|无法继续|blocked)/i.test(message);
   if (
@@ -596,6 +725,10 @@ export function normalizeGatewayRefinement(
     } else if (onlyRescheduled) {
       verifiedMessage = "已重新计算后续日程，任务内容和顺序保持不变。";
     }
+  }
+
+  if (semanticRepairAddedOperations && semanticRepair) {
+    verifiedMessage = semanticRepair.assistantMessage;
   }
 
   return refinementOutputSchema.parse({
