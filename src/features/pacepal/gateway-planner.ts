@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createGoogle, type GoogleInteractionsModelId } from "@ai-sdk/google";
+import { createGoogle } from "@ai-sdk/google";
 import {
   extractJsonMiddleware,
   gateway,
@@ -19,7 +19,6 @@ import {
   classifyGatewayFailure,
   gatewayFailureLog,
   planningModelsFailed,
-  shouldStopDirectGoogleFallbacks,
   type PlanningFailureAttempt,
 } from "@/features/pacepal/gateway-error";
 import {
@@ -32,36 +31,14 @@ import { withPlanningTimeout } from "@/features/pacepal/planning-timeout";
 import { serverEnvironment } from "@/lib/env/server";
 
 export const gatewayModel = "google/gemini-3.8-flash";
-export const directGoogleFallbackModels = [
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-] as const;
 export const planningRequestTimeoutMs = 55_000;
-const directGoogleTimeoutsMs = [22_000, 18_000, 9_000] as const;
+export const planningAttemptTimeoutsMs = [36_000, 16_000] as const;
 export const gatewayModelProfiles = [
   {
     id: gatewayModel,
     provider: "gateway" as const,
-    reasoning: "high" as const,
-    timeoutMs: 14_000,
-  },
-  {
-    id: "recursive/flint-v1.0",
-    provider: "gateway" as const,
-    reasoning: "none" as const,
-    timeoutMs: 9_000,
-  },
-  {
-    id: "nvidia/nemotron-3.5-lightning-free",
-    provider: "gateway" as const,
-    reasoning: "none" as const,
-    timeoutMs: 9_000,
-  },
-  {
-    id: "reflection/beam-free",
-    provider: "gateway" as const,
-    reasoning: "low" as const,
-    timeoutMs: 8_000,
+    reasoning: "medium" as const,
+    timeoutMs: planningAttemptTimeoutsMs[0],
   },
 ] as const;
 
@@ -72,7 +49,7 @@ export type PlanningModelProfile =
       provider: "google";
       reasoning: "high" | "medium" | "low";
       timeoutMs: number;
-      transport: "interactions" | "generate-content";
+      transport: "generate-content";
     };
 
 export function planningModelProfiles(): PlanningModelProfile[] {
@@ -80,46 +57,25 @@ export function planningModelProfiles(): PlanningModelProfile[] {
     serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
   );
   const configuredModel = serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL;
-  const configuredTransport: "interactions" | "generate-content" =
-    configuredModel.startsWith("gemini-3.")
-      ? "interactions"
-      : "generate-content";
-  const directGoogleCandidates = [
-    {
-      id: configuredModel,
-      transport: configuredTransport,
-    },
-    ...directGoogleFallbackModels.map((id) => ({
-      id,
-      transport: "generate-content" as const,
-    })),
-  ].filter(
-    (candidate, index, candidates) =>
-      candidates.findIndex((value) => value.id === candidate.id) === index,
-  );
-  const directGoogle = hasDirectGoogle
-    ? directGoogleCandidates.map((candidate, index) => ({
-        ...candidate,
-        provider: "google" as const,
-        reasoning:
-          index === 0
-            ? ("high" as const)
-            : index === 1
-              ? ("medium" as const)
-              : ("low" as const),
-        timeoutMs: directGoogleTimeoutsMs[index] ?? 9_000,
-      }))
-    : [];
 
-  // Avoid retrying the primary Gemini through AI Gateway after the direct
-  // Google path. The direct fallback above can recover from model-specific
-  // capacity or quota pressure; these remaining profiles provide independent
-  // recovery paths for provider-wide failures.
-  const gatewayFallbacks = hasDirectGoogle
-    ? gatewayModelProfiles.filter((profile) => profile.id !== gatewayModel)
-    : [...gatewayModelProfiles];
+  if (hasDirectGoogle) {
+    return [
+      {
+        id: configuredModel,
+        provider: "google",
+        reasoning: "medium",
+        timeoutMs: planningAttemptTimeoutsMs[0],
+        // AI Studio keys use the standard Gemini Developer API. Keeping one
+        // transport makes failures diagnosable instead of silently switching
+        // API surfaces or models.
+        transport: "generate-content",
+      },
+    ];
+  }
 
-  return [...directGoogle, ...gatewayFallbacks];
+  // A deployment without a direct key still uses the exact same Gemini model
+  // through Vercel AI Gateway. No alternate model is introduced.
+  return [...gatewayModelProfiles];
 }
 
 export function publicModelName(profile: PlanningModelProfile) {
@@ -134,10 +90,7 @@ export function planningLanguageModel(profile: PlanningModelProfile) {
     const google = createGoogle({
       apiKey: serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
     });
-    model =
-      profile.transport === "interactions"
-        ? google.interactions(profile.id as GoogleInteractionsModelId)
-        : google(profile.id);
+    model = google(profile.id);
   } else {
     model = gateway(profile.id);
   }
@@ -179,7 +132,7 @@ export async function probeDirectGemini(): Promise<DirectGeminiProbe> {
       ): profile is Extract<PlanningModelProfile, { provider: "google" }> =>
         profile.provider === "google",
     )
-    .slice(0, 3);
+    .slice(0, 1);
   if (directProfiles.length === 0) {
     return {
       attempts: [],
@@ -197,7 +150,7 @@ export async function probeDirectGemini(): Promise<DirectGeminiProbe> {
           generateText({
             abortSignal,
             maxOutputTokens: 32,
-            maxRetries: 0,
+            maxRetries: 1,
             model: planningLanguageModel(profile),
             output: Output.object({
               description: "A minimal API connectivity response.",
@@ -207,7 +160,7 @@ export async function probeDirectGemini(): Promise<DirectGeminiProbe> {
             prompt: 'Return exactly one JSON object: {"ok":true}',
             reasoning: "none",
           }),
-        5_000,
+        10_000,
       );
       const result: DirectGeminiProbe = {
         attempts,
@@ -268,18 +221,18 @@ export async function generateGatewayPlan(
   const startedAt = Date.now();
   const deadline = Date.now() + planningRequestTimeoutMs;
   const failures: PlanningFailureAttempt[] = [];
-  let directGoogleConfigurationFailed = false;
+  const profile = planningModelProfiles()[0];
 
-  for (const profile of planningModelProfiles()) {
-    if (profile.provider === "google" && directGoogleConfigurationFailed) {
-      continue;
-    }
+  for (const [
+    attemptIndex,
+    attemptTimeoutMs,
+  ] of planningAttemptTimeoutsMs.entries()) {
     const remainingTime = deadline - Date.now();
     if (remainingTime < 3_000) break;
     const attemptStartedAt = Date.now();
     try {
       const requestTimeoutMs = Math.min(
-        profile.timeoutMs,
+        attemptTimeoutMs,
         remainingTime - 1_000,
       );
       const { output } = await withPlanningTimeout(
@@ -288,9 +241,8 @@ export async function generateGatewayPlan(
             abortSignal,
             maxOutputTokens: 3072,
             model: planningLanguageModel(profile),
-            // Do not let the SDK multiply one request into several immediate
-            // retries. On free-tier 429/503 responses we move to the deliberately
-            // selected fallback model instead.
+            // Retry explicitly below so every attempt uses the same model and
+            // remains observable in our diagnostics.
             maxRetries: 0,
             output: Output.object({
               description:
@@ -317,20 +269,20 @@ export async function generateGatewayPlan(
         provider: profile.provider,
         reason: failure,
       });
-      if (
-        profile.provider === "google" &&
-        shouldStopDirectGoogleFallbacks(error, failure)
-      ) {
-        directGoogleConfigurationFailed = true;
-      }
+      const canRetry =
+        attemptIndex + 1 < planningAttemptTimeoutsMs.length &&
+        !["authentication", "configuration", "model-unavailable"].includes(
+          failure,
+        );
       console.warn(
-        `AI planning model ${publicModelName(profile)} failed (${failure}); trying next model. elapsed=${Date.now() - attemptStartedAt}ms remaining=${Math.max(0, deadline - Date.now())}ms. ${gatewayFailureLog(error)}`,
+        `AI planning request ${publicModelName(profile)} failed (${failure}); ${canRetry ? "retrying the same model" : "not retrying"}. elapsed=${Date.now() - attemptStartedAt}ms remaining=${Math.max(0, deadline - Date.now())}ms. ${gatewayFailureLog(error)}`,
       );
+      if (!canRetry) break;
     }
   }
 
   console.error(
-    "AI planning model chain exhausted.",
+    "AI planning request exhausted same-model retries.",
     JSON.stringify({
       durationMs: Date.now() - startedAt,
       attempts: failures,

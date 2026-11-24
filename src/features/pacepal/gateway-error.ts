@@ -45,7 +45,7 @@ export class PlanningModelsFailedError extends Error {
     failureReason: GatewayFailureReason,
     attempts: PlanningFailureAttempt[],
   ) {
-    super(`All AI planning models failed (${failureReason}).`);
+    super(`The AI planning request failed (${failureReason}).`);
     this.name = "PlanningModelsFailedError";
     this.failureReason = failureReason;
     this.attempts = attempts;

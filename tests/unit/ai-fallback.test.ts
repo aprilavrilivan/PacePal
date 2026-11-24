@@ -36,7 +36,7 @@ describe("refinementFallback", () => {
     expect(result.changed).toBe(false);
   });
 
-  it("does not misreport capacity failures as API-key failures", () => {
+  it("does not misreport transient provider failures as API-key failures", () => {
     const result = refinementFallback(
       {
         assistantMessage: "已安全调整明确的进度。",
@@ -46,7 +46,7 @@ describe("refinementFallback", () => {
       "unavailable",
     );
 
-    expect(result.assistantMessage).toContain("容量繁忙");
+    expect(result.assistantMessage).toContain("Gemini 当前未能及时响应");
     expect(result.assistantMessage).not.toContain("密钥");
   });
 });

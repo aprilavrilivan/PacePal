@@ -8,7 +8,7 @@ const failureIntroductions: Record<GatewayFailureReason, string> = {
   timeout: "AI 规划服务本次响应超时。",
   "invalid-output": "AI 返回的计划格式未通过完整校验。",
   "model-unavailable": "配置的 Gemini 模型当前不可用。",
-  unavailable: "Gemini 当前容量繁忙，备用模型也未能及时响应。",
+  unavailable: "Gemini 当前未能及时响应。",
   "gateway-error": "AI 规划服务本次调用没有成功完成。",
 };
 

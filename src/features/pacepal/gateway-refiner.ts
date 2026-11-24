@@ -3,6 +3,7 @@ import "server-only";
 import { generateText, Output } from "ai";
 
 import {
+  planningAttemptTimeoutsMs,
   planningRequestTimeoutMs,
   planningLanguageModel,
   planningModelProfiles,
@@ -12,7 +13,6 @@ import {
   classifyGatewayFailure,
   gatewayFailureLog,
   planningModelsFailed,
-  shouldStopDirectGoogleFallbacks,
   type PlanningFailureAttempt,
 } from "@/features/pacepal/gateway-error";
 import { normalizeGatewayRefinement } from "@/features/pacepal/gateway-refinement-normalizer";
@@ -92,19 +92,19 @@ export async function generateGatewayRefinement(
   const deadline = Date.now() + planningRequestTimeoutMs;
   const failures: PlanningFailureAttempt[] = [];
   let correction = "";
-  let directGoogleConfigurationFailed = false;
+  const profile = planningModelProfiles()[0];
 
-  for (const profile of planningModelProfiles()) {
-    if (profile.provider === "google" && directGoogleConfigurationFailed) {
-      continue;
-    }
+  for (const [
+    attemptIndex,
+    attemptTimeoutMs,
+  ] of planningAttemptTimeoutsMs.entries()) {
     const remainingTime = deadline - Date.now();
     if (remainingTime < 3_000) break;
     const attemptStartedAt = Date.now();
 
     try {
       const requestTimeoutMs = Math.min(
-        profile.timeoutMs,
+        attemptTimeoutMs,
         remainingTime - 1_000,
       );
       const { output: rawOutput } = await withPlanningTimeout(
@@ -112,8 +112,8 @@ export async function generateGatewayRefinement(
           generateText({
             abortSignal,
             maxOutputTokens: 4096,
-            // Immediate SDK retries amplify free-tier quota and overload
-            // failures. The bounded model chain is the retry strategy.
+            // Retry explicitly below so a validation failure can feed a
+            // corrective instruction back to the same model.
             maxRetries: 0,
             model: planningLanguageModel(profile),
             output: Output.object({
@@ -205,7 +205,7 @@ export async function generateGatewayRefinement(
         reason: "invalid-output",
       });
       console.warn(
-        `AI refinement model ${publicModelName(profile)} produced invalid output; trying next model. elapsed=${Date.now() - attemptStartedAt}ms remaining=${Math.max(0, deadline - Date.now())}ms. ${issues.join(" | ")}`,
+        `AI refinement model ${publicModelName(profile)} produced invalid output; ${attemptIndex + 1 < planningAttemptTimeoutsMs.length ? "retrying the same model with validation feedback" : "not retrying"}. elapsed=${Date.now() - attemptStartedAt}ms remaining=${Math.max(0, deadline - Date.now())}ms. ${issues.join(" | ")}`,
       );
     } catch (error) {
       correction =
@@ -216,20 +216,20 @@ export async function generateGatewayRefinement(
         provider: profile.provider,
         reason: failure,
       });
-      if (
-        profile.provider === "google" &&
-        shouldStopDirectGoogleFallbacks(error, failure)
-      ) {
-        directGoogleConfigurationFailed = true;
-      }
+      const canRetry =
+        attemptIndex + 1 < planningAttemptTimeoutsMs.length &&
+        !["authentication", "configuration", "model-unavailable"].includes(
+          failure,
+        );
       console.warn(
-        `AI refinement model ${publicModelName(profile)} failed (${failure}); trying next model. elapsed=${Date.now() - attemptStartedAt}ms remaining=${Math.max(0, deadline - Date.now())}ms. ${gatewayFailureLog(error)}`,
+        `AI refinement request ${publicModelName(profile)} failed (${failure}); ${canRetry ? "retrying the same model" : "not retrying"}. elapsed=${Date.now() - attemptStartedAt}ms remaining=${Math.max(0, deadline - Date.now())}ms. ${gatewayFailureLog(error)}`,
       );
+      if (!canRetry) break;
     }
   }
 
   console.error(
-    "AI refinement model chain exhausted.",
+    "AI refinement request exhausted same-model retries.",
     JSON.stringify({
       durationMs: Date.now() - startedAt,
       attempts: failures,
