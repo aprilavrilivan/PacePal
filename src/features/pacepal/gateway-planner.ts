@@ -105,6 +105,7 @@ export function planningLanguageModel(profile: PlanningModelProfile) {
 
 export type DirectGeminiProbe = {
   attempts: Array<{
+    detail: string;
     model: string;
     reason: ReturnType<typeof classifyGatewayFailure>;
   }>;
@@ -175,6 +176,7 @@ export async function probeDirectGemini(): Promise<DirectGeminiProbe> {
       return result;
     } catch (error) {
       attempts.push({
+        detail: gatewayFailureLog(error),
         model: publicModelName(profile),
         reason: classifyGatewayFailure(error),
       });

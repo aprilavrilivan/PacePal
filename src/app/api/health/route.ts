@@ -19,12 +19,17 @@ export async function GET(request: Request) {
     return Response.json(health);
   }
 
+  const geminiProbe = await probeDirectGemini();
+  const degraded = geminiProbe.configured && !geminiProbe.reachable;
+
   return Response.json(
     {
       ...health,
-      geminiProbe: await probeDirectGemini(),
+      status: degraded ? "degraded" : "ok",
+      geminiProbe,
     },
     {
+      status: degraded ? 503 : 200,
       headers: {
         "Cache-Control": "no-store",
       },
