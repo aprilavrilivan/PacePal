@@ -35,4 +35,18 @@ describe("refinementFallback", () => {
     expect(result.assistantMessage).toContain("没有更改你的计划");
     expect(result.changed).toBe(false);
   });
+
+  it("does not misreport capacity failures as API-key failures", () => {
+    const result = refinementFallback(
+      {
+        assistantMessage: "已安全调整明确的进度。",
+        changed: true,
+        operations: [],
+      },
+      "unavailable",
+    );
+
+    expect(result.assistantMessage).toContain("容量繁忙");
+    expect(result.assistantMessage).not.toContain("密钥");
+  });
 });

@@ -1,14 +1,22 @@
 const failurePatterns = [
   [
-    "authentication",
-    /\b(?:401|403)\b|auth|credential|oidc|token|api[ _-]?key|permission denied|unauthorized|forbidden/i,
-  ],
-  [
     "quota",
     /\b429\b|too many requests|resource exhausted|credit|quota|billing|payment|insufficient|rate[ _-]?limit/i,
   ],
   ["timeout", /abort|timeout|timed out|deadline exceeded/i],
   ["invalid-output", /output|schema|parse|json|validation|zod/i],
+  [
+    "authentication",
+    /\b401\b|api[_ -]?key[_ -]?invalid|api key not valid|invalid api key|unauthenticated|invalid authentication credentials|oidc token/i,
+  ],
+  [
+    "configuration",
+    /\b403\b|permission denied|forbidden|service[_ -]?disabled|api has not been used|api is not enabled|access not configured|referer.+blocked/i,
+  ],
+  [
+    "model-unavailable",
+    /\b404\b|model.+(?:not found|not supported|not available)|not found.+model|no longer available/i,
+  ],
   [
     "unavailable",
     /\b(?:500|502|503|504)\b|unavailable|overload|capacity|provider|service unavailable/i,
@@ -17,6 +25,32 @@ const failurePatterns = [
 
 export type GatewayFailureReason =
   (typeof failurePatterns)[number][0] | "gateway-error";
+
+export type PlanningFailureAttempt = {
+  model: string;
+  provider: "google" | "gateway";
+  reason: GatewayFailureReason;
+};
+
+const failureReasons = new Set<GatewayFailureReason>([
+  ...failurePatterns.map(([reason]) => reason),
+  "gateway-error",
+]);
+
+export class PlanningModelsFailedError extends Error {
+  readonly attempts: PlanningFailureAttempt[];
+  readonly failureReason: GatewayFailureReason;
+
+  constructor(
+    failureReason: GatewayFailureReason,
+    attempts: PlanningFailureAttempt[],
+  ) {
+    super(`All AI planning models failed (${failureReason}).`);
+    this.name = "PlanningModelsFailedError";
+    this.failureReason = failureReason;
+    this.attempts = attempts;
+  }
+}
 
 function errorText(error: unknown, depth = 0): string {
   if (depth > 3 || error == null) return "";
@@ -40,11 +74,56 @@ function errorText(error: unknown, depth = 0): string {
 }
 
 export function classifyGatewayFailure(error: unknown): GatewayFailureReason {
+  if (error && typeof error === "object") {
+    const failureReason = (error as { failureReason?: unknown }).failureReason;
+    if (
+      typeof failureReason === "string" &&
+      failureReasons.has(failureReason as GatewayFailureReason)
+    ) {
+      return failureReason as GatewayFailureReason;
+    }
+  }
+
   const text = errorText(error);
 
   return (
     failurePatterns.find(([, pattern]) => pattern.test(text))?.[0] ??
     "gateway-error"
+  );
+}
+
+function preferredFailureReason(attempts: PlanningFailureAttempt[]) {
+  const directGoogleAttempts = attempts.filter(
+    (attempt) => attempt.provider === "google",
+  );
+  const relevantAttempts = directGoogleAttempts.length
+    ? directGoogleAttempts
+    : attempts;
+  const reasons = new Set(relevantAttempts.map((attempt) => attempt.reason));
+
+  // Authentication and project configuration errors are deterministic. For
+  // all other failures, prefer the most actionable provider condition instead
+  // of whichever fallback happened to run last.
+  for (const reason of [
+    "authentication",
+    "configuration",
+    "quota",
+    "unavailable",
+    "timeout",
+    "model-unavailable",
+    "invalid-output",
+    "gateway-error",
+  ] as const) {
+    if (reasons.has(reason)) return reason;
+  }
+
+  return "gateway-error";
+}
+
+export function planningModelsFailed(attempts: PlanningFailureAttempt[]) {
+  return new PlanningModelsFailedError(
+    preferredFailureReason(attempts),
+    attempts,
   );
 }
 

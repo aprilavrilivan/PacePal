@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyGatewayFailure,
   gatewayFailureLog,
+  planningModelsFailed,
 } from "@/features/pacepal/gateway-error";
 import { buildSubtasks } from "@/features/pacepal/plan-api";
 
@@ -10,6 +11,8 @@ describe("classifyGatewayFailure", () => {
   it.each([
     ["OIDC token is invalid", "authentication"],
     ["Request failed with status 401", "authentication"],
+    ["Request failed with status 403", "configuration"],
+    ["API is not enabled for this project", "configuration"],
     ["Insufficient credits", "quota"],
     ["429 RESOURCE_EXHAUSTED", "quota"],
     ["Request timed out", "timeout"],
@@ -18,6 +21,7 @@ describe("classifyGatewayFailure", () => {
     ["ZodError invalid task operation", "invalid-output"],
     ["Provider is unavailable", "unavailable"],
     ["Request failed with status 503", "unavailable"],
+    ["Model gemini-example was not found", "model-unavailable"],
     ["Unexpected failure", "gateway-error"],
   ])("classifies %s", (message, expected) => {
     expect(classifyGatewayFailure(new Error(message))).toBe(expected);
@@ -39,6 +43,40 @@ describe("classifyGatewayFailure", () => {
 
     expect(log).not.toContain(apiKey);
     expect(log).toContain("[redacted]");
+  });
+
+  it("keeps the direct Gemini failure instead of the last gateway failure", () => {
+    const error = planningModelsFailed([
+      {
+        model: "google/gemini-3.8-flash:direct",
+        provider: "google",
+        reason: "unavailable",
+      },
+      {
+        model: "recursive/flint-v1.0",
+        provider: "gateway",
+        reason: "authentication",
+      },
+    ]);
+
+    expect(classifyGatewayFailure(error)).toBe("unavailable");
+  });
+
+  it("prioritizes an invalid direct key over fallback failures", () => {
+    const error = planningModelsFailed([
+      {
+        model: "google/gemini-3.8-flash:direct",
+        provider: "google",
+        reason: "authentication",
+      },
+      {
+        model: "recursive/flint-v1.0",
+        provider: "gateway",
+        reason: "unavailable",
+      },
+    ]);
+
+    expect(classifyGatewayFailure(error)).toBe("authentication");
   });
 });
 

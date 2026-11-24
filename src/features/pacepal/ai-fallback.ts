@@ -2,12 +2,14 @@ import type { GatewayFailureReason } from "@/features/pacepal/gateway-error";
 import type { RefinementOutput } from "@/features/pacepal/refinement";
 
 const failureIntroductions: Record<GatewayFailureReason, string> = {
-  authentication: "Gemini 的 API 配置暂时未通过验证。",
-  quota: "Gemini 当前达到调用频率或额度限制。",
-  timeout: "Gemini 本次规划响应超时。",
-  "invalid-output": "Gemini 返回的计划格式未通过完整校验。",
-  unavailable: "Gemini 服务当前暂时不可用。",
-  "gateway-error": "Gemini 本次规划调用没有成功完成。",
+  authentication: "Gemini 密钥未被 Google 接受。",
+  configuration: "Google 项目的 Gemini API 尚未启用或无权访问。",
+  quota: "AI 规划服务当前达到调用频率或额度限制。",
+  timeout: "AI 规划服务本次响应超时。",
+  "invalid-output": "AI 返回的计划格式未通过完整校验。",
+  "model-unavailable": "配置的 Gemini 模型当前不可用。",
+  unavailable: "Gemini 当前容量繁忙，备用模型也未能及时响应。",
+  "gateway-error": "AI 规划服务本次调用没有成功完成。",
 };
 
 export function refinementFallback(

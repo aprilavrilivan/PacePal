@@ -17,6 +17,8 @@ import { extractGatewayJson } from "@/features/pacepal/gateway-json";
 import {
   classifyGatewayFailure,
   gatewayFailureLog,
+  planningModelsFailed,
+  type PlanningFailureAttempt,
 } from "@/features/pacepal/gateway-error";
 import {
   assignmentInputSchema,
@@ -27,7 +29,11 @@ import { buildSubtasks } from "@/features/pacepal/plan-api";
 import { serverEnvironment } from "@/lib/env/server";
 
 export const gatewayModel = "google/gemini-3.8-flash";
-export const directGoogleFallbackModels = ["gemini-3.5-flash-lite"] as const;
+export const directGoogleFallbackModels = [
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+] as const;
 export const gatewayModelProfiles = [
   {
     id: gatewayModel,
@@ -77,7 +83,7 @@ export function planningModelProfiles(): PlanningModelProfile[] {
         id,
         provider: "google" as const,
         reasoning: "high" as const,
-        timeoutMs: index === 0 ? 32_000 : 15_000,
+        timeoutMs: index === 0 ? 20_000 : index === 1 ? 16_000 : 11_000,
       }))
     : [];
 
@@ -139,11 +145,11 @@ export async function generateGatewayPlan(
 ): Promise<{ model: string; subtasks: Subtask[] }> {
   const assignment = assignmentInputSchema.parse(input);
   const deadline = Date.now() + 55_000;
-  let lastError: unknown;
-  let directGoogleAuthenticationFailed = false;
+  const failures: PlanningFailureAttempt[] = [];
+  let directGoogleConfigurationFailed = false;
 
   for (const profile of planningModelProfiles()) {
-    if (profile.provider === "google" && directGoogleAuthenticationFailed) {
+    if (profile.provider === "google" && directGoogleConfigurationFailed) {
       continue;
     }
     for (let profileAttempt = 0; profileAttempt < 2; profileAttempt += 1) {
@@ -179,14 +185,21 @@ export async function generateGatewayPlan(
           ),
         };
       } catch (error) {
-        lastError = error;
         const failure = classifyGatewayFailure(error);
+        failures.push({
+          model: publicModelName(profile),
+          provider: profile.provider,
+          reason: failure,
+        });
         const retryStructuredOutput =
           profileAttempt === 0 &&
           failure === "invalid-output" &&
           deadline - Date.now() >= 5_000;
-        if (profile.provider === "google" && failure === "authentication") {
-          directGoogleAuthenticationFailed = true;
+        if (
+          profile.provider === "google" &&
+          (failure === "authentication" || failure === "configuration")
+        ) {
+          directGoogleConfigurationFailed = true;
         }
         console.warn(
           `AI planning model ${publicModelName(profile)} failed (${failure}); ${retryStructuredOutput ? "retrying structured output" : "trying next model"}. ${gatewayFailureLog(error)}`,
@@ -197,7 +210,5 @@ export async function generateGatewayPlan(
     }
   }
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("All AI planning models failed.");
+  throw planningModelsFailed(failures);
 }

@@ -1,5 +1,25 @@
 import { z } from "zod";
 
+function normalizeEnvironmentValue(value: string | undefined) {
+  if (!value) return undefined;
+  let normalized = value.trim();
+  const assignmentIndex = normalized.indexOf("=");
+  if (assignmentIndex > 0) {
+    const possibleName = normalized.slice(0, assignmentIndex).trim();
+    if (/^[A-Z][A-Z0-9_]+$/.test(possibleName)) {
+      normalized = normalized.slice(assignmentIndex + 1).trim();
+    }
+  }
+  if (
+    normalized.length >= 2 &&
+    ((normalized.startsWith('"') && normalized.endsWith('"')) ||
+      (normalized.startsWith("'") && normalized.endsWith("'")))
+  ) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized || undefined;
+}
+
 const serverEnvironmentSchema = z.object({
   AI_GATEWAY_API_KEY: z.string().min(1).optional(),
   AI_PROVIDER: z.enum(["mock", "gateway"]).default("mock"),
@@ -8,11 +28,14 @@ const serverEnvironmentSchema = z.object({
 });
 
 const parsedEnvironment = serverEnvironmentSchema.safeParse({
-  AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY || undefined,
+  AI_GATEWAY_API_KEY: normalizeEnvironmentValue(process.env.AI_GATEWAY_API_KEY),
   AI_PROVIDER: process.env.AI_PROVIDER,
-  GOOGLE_GENERATIVE_AI_API_KEY:
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY || undefined,
-  GOOGLE_GENERATIVE_AI_MODEL: process.env.GOOGLE_GENERATIVE_AI_MODEL,
+  GOOGLE_GENERATIVE_AI_API_KEY: normalizeEnvironmentValue(
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+  ),
+  GOOGLE_GENERATIVE_AI_MODEL: normalizeEnvironmentValue(
+    process.env.GOOGLE_GENERATIVE_AI_MODEL,
+  ),
 });
 
 if (!parsedEnvironment.success) {

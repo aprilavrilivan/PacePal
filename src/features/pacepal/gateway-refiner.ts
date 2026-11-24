@@ -10,6 +10,8 @@ import {
 import {
   classifyGatewayFailure,
   gatewayFailureLog,
+  planningModelsFailed,
+  type PlanningFailureAttempt,
 } from "@/features/pacepal/gateway-error";
 import { normalizeGatewayRefinement } from "@/features/pacepal/gateway-refinement-normalizer";
 import { recommendNextTask } from "@/features/pacepal/execution";
@@ -84,12 +86,12 @@ export async function generateGatewayRefinement(
   message: string,
 ): Promise<{ model: string; output: RefinementOutput }> {
   const deadline = Date.now() + 55_000;
-  let lastError: unknown;
+  const failures: PlanningFailureAttempt[] = [];
   let correction = "";
-  let directGoogleAuthenticationFailed = false;
+  let directGoogleConfigurationFailed = false;
 
   for (const profile of planningModelProfiles()) {
-    if (profile.provider === "google" && directGoogleAuthenticationFailed) {
+    if (profile.provider === "google" && directGoogleConfigurationFailed) {
       continue;
     }
     for (let profileAttempt = 0; profileAttempt < 2; profileAttempt += 1) {
@@ -189,20 +191,31 @@ export async function generateGatewayRefinement(
           ...issues.map((issue) => `- ${issue}`),
           "Do not describe a change unless the corresponding operation is present.",
         ].join("\n");
-        lastError = new Error(issues.join(" "));
+        failures.push({
+          model: publicModelName(profile),
+          provider: profile.provider,
+          reason: "invalid-output",
+        });
         if (profileAttempt === 0 && deadline - Date.now() >= 5_000) continue;
         break;
       } catch (error) {
-        lastError = error;
         correction =
           "A previous model response could not be parsed or validated. Return one complete JSON object and make every justified task change.";
         const failure = classifyGatewayFailure(error);
+        failures.push({
+          model: publicModelName(profile),
+          provider: profile.provider,
+          reason: failure,
+        });
         const retrySameProfile =
           profileAttempt === 0 &&
           failure === "invalid-output" &&
           deadline - Date.now() >= 5_000;
-        if (profile.provider === "google" && failure === "authentication") {
-          directGoogleAuthenticationFailed = true;
+        if (
+          profile.provider === "google" &&
+          (failure === "authentication" || failure === "configuration")
+        ) {
+          directGoogleConfigurationFailed = true;
         }
         console.warn(
           `AI refinement model ${publicModelName(profile)} failed (${failure}); ${retrySameProfile ? "retrying with correction" : "trying next model"}. ${gatewayFailureLog(error)}`,
@@ -213,7 +226,5 @@ export async function generateGatewayRefinement(
     }
   }
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("AI refinement failed validation.");
+  throw planningModelsFailed(failures);
 }
