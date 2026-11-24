@@ -3,6 +3,7 @@
 import type { User } from "@supabase/supabase-js";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { CalendarMonthView } from "@/components/calendar-month-view";
 import {
   loadCloudState,
   saveCloudState,
@@ -14,7 +15,6 @@ import {
   type AppState,
   type ChatMessage,
   type Energy,
-  type ScheduleBlock,
   type Subtask,
 } from "@/features/pacepal/model";
 import { recommendAcrossAssignments } from "@/features/pacepal/execution";
@@ -364,14 +364,6 @@ export function PacePalApp() {
   const completedCount =
     assignment?.subtasks.filter((subtask) => subtask.status === "completed")
       .length ?? 0;
-  const taskById = useMemo(
-    () =>
-      new Map(
-        (assignment?.subtasks ?? []).map((subtask) => [subtask.id, subtask]),
-      ),
-    [assignment?.subtasks],
-  );
-
   const recommendation = useMemo(
     () =>
       recommendAcrossAssignments(
@@ -380,19 +372,6 @@ export function PacePalApp() {
       ),
     [assignment?.checkIn, assignments],
   );
-
-  const groupedSchedule = useMemo(() => {
-    const grouped = new Map<string, ScheduleBlock[]>();
-    if (!assignment) return [];
-
-    for (const block of assignment.schedule) {
-      const dateBlocks = grouped.get(block.date) ?? [];
-      dateBlocks.push(block);
-      grouped.set(block.date, dateBlocks);
-    }
-
-    return Array.from(grouped.entries());
-  }, [assignment]);
 
   function updateAssignment(
     updater: (current: Assignment) => Assignment,
@@ -993,31 +972,6 @@ export function PacePalApp() {
       })),
     }));
     setTodayPlanEditing(false);
-  }
-
-  function toggleBlockLock(id: string) {
-    updateAssignment((current) => ({
-      ...current,
-      schedule: current.schedule.map((block) =>
-        block.id === id ? { ...block, locked: !block.locked } : block,
-      ),
-      scheduleNotice: "时间块锁定状态已更新",
-    }));
-  }
-
-  function moveBlockToTomorrow(id: string) {
-    updateAssignment((current) => {
-      const moved = current.schedule.map((block) => {
-        if (block.id !== id) return block;
-        const date = new Date(`${block.date}T12:00:00`);
-        date.setDate(date.getDate() + 1);
-        return { ...block, date: dateKey(date), locked: true };
-      });
-      return rebuildAssignmentSchedule(
-        { ...current, schedule: moved },
-        "时间块已移至明天并锁定",
-      );
-    });
   }
 
   async function sendChatMessage(content: string) {
@@ -1692,7 +1646,7 @@ export function PacePalApp() {
     : 0;
   const viewTitles: Record<DashboardView, string> = {
     overview: "今日重点",
-    schedule: "安排",
+    schedule: "日历",
     tasks: "任务",
   };
 
@@ -1704,7 +1658,11 @@ export function PacePalApp() {
       onNavigate={setDashboardView}
       syncLabel={syncStatusText[syncStatus]}
     >
-      <div className="mx-auto w-full max-w-[1180px] px-5 py-7 sm:px-8 lg:px-10 lg:py-10">
+      <div
+        className={`mx-auto w-full px-5 py-7 sm:px-8 lg:px-10 lg:py-10 ${
+          dashboardView === "schedule" ? "max-w-[1500px]" : "max-w-[1180px]"
+        }`}
+      >
         <div className="flex flex-col gap-5 pb-7 sm:flex-row sm:items-end sm:justify-between">
           <div>
             {dashboardView === "overview" ? (
@@ -1717,7 +1675,7 @@ export function PacePalApp() {
             </h1>
           </div>
           <div className="flex gap-2">
-            {dashboardView !== "overview" ? (
+            {dashboardView === "tasks" ? (
               <>
                 <button
                   className={textButtonClassName}
@@ -1735,7 +1693,7 @@ export function PacePalApp() {
                 </button>
               </>
             ) : null}
-            {dashboardView !== "tasks" ? (
+            {dashboardView === "overview" ? (
               <button
                 className={primaryButtonClassName}
                 onClick={openCreate}
@@ -2563,69 +2521,12 @@ export function PacePalApp() {
         ) : null}
 
         {dashboardView === "schedule" ? (
-          <section>
-            {groupedSchedule.length > 0 ? (
-              <div className="space-y-7">
-                {groupedSchedule.map(([date, blocks]) => (
-                  <div key={date}>
-                    <h3 className="mb-3 font-semibold text-slate-950">
-                      {formatScheduleDate(date)}
-                    </h3>
-                    <ul
-                      className={`${surfaceClassName} divide-y divide-slate-100 overflow-hidden`}
-                    >
-                      {blocks.map((block) => {
-                        const subtask = taskById.get(block.subtaskId);
-                        return (
-                          <li
-                            className="grid gap-3 px-5 py-4 sm:grid-cols-[4.5rem_1fr_auto] sm:items-center sm:px-6"
-                            key={block.id}
-                          >
-                            <span className="font-medium text-slate-500">
-                              {block.startTime}
-                            </span>
-                            <div>
-                              <span className="font-semibold text-slate-900">
-                                {subtask?.title ?? "任务"}
-                              </span>
-                              <div className="mt-1 flex flex-wrap items-center gap-1">
-                                <span className="text-sm font-medium text-slate-500">
-                                  {block.durationMinutes} 分钟
-                                </span>
-                                {block.locked ? (
-                                  <span className="ml-2 text-sm font-semibold text-blue-700">
-                                    已锁定
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                            <div className="flex flex-wrap gap-1 sm:justify-end">
-                              <button
-                                className={textButtonClassName}
-                                onClick={() => toggleBlockLock(block.id)}
-                                type="button"
-                              >
-                                {block.locked ? "解锁" : "锁定"}
-                              </button>
-                              <button
-                                className={textButtonClassName}
-                                onClick={() => moveBlockToTomorrow(block.id)}
-                                type="button"
-                              >
-                                移至明天
-                              </button>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-4 text-slate-600">当前没有待安排任务。</p>
-            )}
-          </section>
+          <CalendarMonthView
+            assignments={assignments}
+            onSelectAssignment={(assignmentId) =>
+              selectAssignment(assignmentId, "tasks")
+            }
+          />
         ) : null}
       </div>
     </WorkspaceFrame>
@@ -2650,7 +2551,7 @@ function WorkspaceFrame({
   const navigation: Array<{ label: string; view: DashboardView }> = [
     { label: "概览", view: "overview" },
     { label: "任务", view: "tasks" },
-    { label: "安排", view: "schedule" },
+    { label: "日历", view: "schedule" },
   ];
 
   return (

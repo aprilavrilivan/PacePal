@@ -107,9 +107,11 @@ test("creates, approves, schedules, and persists an assignment", async ({
     page.getByText(/我已将.*“理解任务要求”.*标记为完成.*重新计算后续安排/),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "安排" }).click();
-  await page.getByRole("button", { exact: true, name: "锁定" }).first().click();
-  await expect(page.getByText("已锁定", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "日历" }).click();
+  await expect(page.getByRole("heading", { name: "日历" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "上个月" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "下个月" })).toBeVisible();
+  await expect(page.getByText("资料检索与核实").first()).toBeVisible();
 
   await page.reload();
   await expect(page.getByRole("heading", { name: "今日重点" })).toBeVisible();
@@ -148,6 +150,10 @@ test("keeps multiple assignments and lets the user switch between them", async (
   await expect(page.getByRole("button", { name: /项目汇报/ })).toBeVisible();
   await page.getByRole("button", { name: /课程论文/ }).click();
   await expect(page.getByText("课程论文").first()).toBeVisible();
+
+  await page.getByRole("button", { name: "日历" }).click();
+  await expect(page.getByText("课程论文").first()).toBeVisible();
+  await expect(page.getByText("项目汇报").first()).toBeVisible();
 });
 
 test("reports a healthy mock foundation", async ({ request }) => {
