@@ -4,6 +4,7 @@ import {
   classifyGatewayFailure,
   gatewayFailureLog,
   planningModelsFailed,
+  shouldStopDirectGoogleFallbacks,
 } from "@/features/pacepal/gateway-error";
 import { buildSubtasks } from "@/features/pacepal/plan-api";
 
@@ -77,6 +78,28 @@ describe("classifyGatewayFailure", () => {
     ]);
 
     expect(classifyGatewayFailure(error)).toBe("authentication");
+  });
+
+  it("keeps trying Gemini candidates after a generic model-level 403", () => {
+    const error = new Error("Request failed with status 403 PERMISSION_DENIED");
+
+    expect(classifyGatewayFailure(error)).toBe("configuration");
+    expect(shouldStopDirectGoogleFallbacks(error)).toBe(false);
+  });
+
+  it("stops direct Gemini retries for explicit project-wide failures", () => {
+    expect(
+      shouldStopDirectGoogleFallbacks(
+        new Error(
+          "403 PERMISSION_DENIED: Your project has been denied access.",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      shouldStopDirectGoogleFallbacks(
+        new Error("API is not enabled for this project"),
+      ),
+    ).toBe(true);
   });
 });
 

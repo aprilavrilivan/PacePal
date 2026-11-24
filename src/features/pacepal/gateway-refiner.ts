@@ -11,6 +11,7 @@ import {
   classifyGatewayFailure,
   gatewayFailureLog,
   planningModelsFailed,
+  shouldStopDirectGoogleFallbacks,
   type PlanningFailureAttempt,
 } from "@/features/pacepal/gateway-error";
 import { normalizeGatewayRefinement } from "@/features/pacepal/gateway-refinement-normalizer";
@@ -213,7 +214,7 @@ export async function generateGatewayRefinement(
           deadline - Date.now() >= 5_000;
         if (
           profile.provider === "google" &&
-          (failure === "authentication" || failure === "configuration")
+          shouldStopDirectGoogleFallbacks(error, failure)
         ) {
           directGoogleConfigurationFailed = true;
         }

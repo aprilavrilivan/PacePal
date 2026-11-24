@@ -18,6 +18,7 @@ import {
   classifyGatewayFailure,
   gatewayFailureLog,
   planningModelsFailed,
+  shouldStopDirectGoogleFallbacks,
   type PlanningFailureAttempt,
 } from "@/features/pacepal/gateway-error";
 import {
@@ -30,9 +31,10 @@ import { serverEnvironment } from "@/lib/env/server";
 
 export const gatewayModel = "google/gemini-3.8-flash";
 export const directGoogleFallbackModels = [
+  "gemini-3.7-flash",
   "gemini-3.6-flash",
+  "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
-  "gemini-3.1-flash-lite",
 ] as const;
 export const gatewayModelProfiles = [
   {
@@ -83,7 +85,7 @@ export function planningModelProfiles(): PlanningModelProfile[] {
         id,
         provider: "google" as const,
         reasoning: "high" as const,
-        timeoutMs: index === 0 ? 20_000 : index === 1 ? 16_000 : 11_000,
+        timeoutMs: index === 0 ? 18_000 : index === 1 ? 11_000 : 8_000,
       }))
     : [];
 
@@ -197,7 +199,7 @@ export async function generateGatewayPlan(
           deadline - Date.now() >= 5_000;
         if (
           profile.provider === "google" &&
-          (failure === "authentication" || failure === "configuration")
+          shouldStopDirectGoogleFallbacks(error, failure)
         ) {
           directGoogleConfigurationFailed = true;
         }

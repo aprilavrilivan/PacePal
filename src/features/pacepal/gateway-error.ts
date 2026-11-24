@@ -92,6 +92,24 @@ export function classifyGatewayFailure(error: unknown): GatewayFailureReason {
   );
 }
 
+export function shouldStopDirectGoogleFallbacks(
+  error: unknown,
+  failureReason = classifyGatewayFailure(error),
+) {
+  if (failureReason === "authentication") return true;
+  if (failureReason !== "configuration") return false;
+
+  const text = errorText(error);
+
+  // A bare 403/permission-denied response may be specific to one model or
+  // model release. Continue through the direct Gemini candidates in that
+  // case. Only stop when Google explicitly reports that the whole project or
+  // API service cannot make generation requests.
+  return /service[_ -]?disabled|api has not been used|api is not enabled|access not configured|referer.+blocked|api[_ -]?key[_ -]?service[_ -]?blocked|project has been denied access|location.+not supported/i.test(
+    text,
+  );
+}
+
 function preferredFailureReason(attempts: PlanningFailureAttempt[]) {
   const directGoogleAttempts = attempts.filter(
     (attempt) => attempt.provider === "google",
