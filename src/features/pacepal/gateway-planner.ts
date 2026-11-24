@@ -33,12 +33,11 @@ import { serverEnvironment } from "@/lib/env/server";
 
 export const gatewayModel = "google/gemini-3.8-flash";
 export const directGoogleFallbackModels = [
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
   "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
 ] as const;
-export const planningRequestTimeoutMs = 46_000;
-const directGoogleTimeoutsMs = [12_000, 10_000, 8_000, 7_000, 6_000] as const;
+export const planningRequestTimeoutMs = 55_000;
+const directGoogleTimeoutsMs = [22_000, 18_000, 9_000] as const;
 export const gatewayModelProfiles = [
   {
     id: gatewayModel,
@@ -71,7 +70,7 @@ export type PlanningModelProfile =
   | {
       id: string;
       provider: "google";
-      reasoning: "high" | "medium";
+      reasoning: "high" | "medium" | "low";
       timeoutMs: number;
       transport: "interactions" | "generate-content";
     };
@@ -81,17 +80,14 @@ export function planningModelProfiles(): PlanningModelProfile[] {
     serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
   );
   const configuredModel = serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL;
+  const configuredTransport: "interactions" | "generate-content" =
+    configuredModel.startsWith("gemini-3.")
+      ? "interactions"
+      : "generate-content";
   const directGoogleCandidates = [
-    // Gemini 3.8 is exposed through Google's Interactions API. Keep the
-    // generateContent route immediately behind it because Google can roll out
-    // access to the two endpoints independently for the same project/key.
     {
       id: configuredModel,
-      transport: "interactions" as const,
-    },
-    {
-      id: configuredModel,
-      transport: "generate-content" as const,
+      transport: configuredTransport,
     },
     ...directGoogleFallbackModels.map((id) => ({
       id,
@@ -99,17 +95,19 @@ export function planningModelProfiles(): PlanningModelProfile[] {
     })),
   ].filter(
     (candidate, index, candidates) =>
-      candidates.findIndex(
-        (value) =>
-          value.id === candidate.id && value.transport === candidate.transport,
-      ) === index,
+      candidates.findIndex((value) => value.id === candidate.id) === index,
   );
   const directGoogle = hasDirectGoogle
     ? directGoogleCandidates.map((candidate, index) => ({
         ...candidate,
         provider: "google" as const,
-        reasoning: index === 0 ? ("high" as const) : ("medium" as const),
-        timeoutMs: directGoogleTimeoutsMs[index] ?? 7_000,
+        reasoning:
+          index === 0
+            ? ("high" as const)
+            : index === 1
+              ? ("medium" as const)
+              : ("low" as const),
+        timeoutMs: directGoogleTimeoutsMs[index] ?? 9_000,
       }))
     : [];
 
@@ -243,12 +241,6 @@ export async function probeDirectGemini(): Promise<DirectGeminiProbe> {
   return result;
 }
 
-function shouldRetryTransientFailure(
-  failure: ReturnType<typeof classifyGatewayFailure>,
-) {
-  return failure === "invalid-output" || failure === "unavailable";
-}
-
 function buildPrompt(assignment: AssignmentInput) {
   return [
     "Create a practical, sequential execution plan for this task or project.",
@@ -273,6 +265,7 @@ export async function generateGatewayPlan(
   input: AssignmentInput,
 ): Promise<{ model: string; subtasks: Subtask[] }> {
   const assignment = assignmentInputSchema.parse(input);
+  const startedAt = Date.now();
   const deadline = Date.now() + planningRequestTimeoutMs;
   const failures: PlanningFailureAttempt[] = [];
   let directGoogleConfigurationFailed = false;
@@ -281,70 +274,67 @@ export async function generateGatewayPlan(
     if (profile.provider === "google" && directGoogleConfigurationFailed) {
       continue;
     }
-    for (let profileAttempt = 0; profileAttempt < 2; profileAttempt += 1) {
-      const remainingTime = deadline - Date.now();
-      if (remainingTime < 3_000) break;
-      try {
-        const requestTimeoutMs = Math.min(
-          profile.timeoutMs,
-          remainingTime - 1_000,
-        );
-        const { output } = await withPlanningTimeout(
-          (abortSignal) =>
-            generateText({
-              abortSignal,
-              maxOutputTokens: 4096,
-              model: planningLanguageModel(profile),
-              // Do not let the SDK multiply one request into several immediate
-              // retries. On free-tier 429/503 responses we move to the deliberately
-              // selected fallback model instead.
-              maxRetries: 0,
-              output: Output.object({
-                description:
-                  "A JSON object containing a sequential assignment plan with 4 to 8 tasks.",
-                name: "assignment_plan",
-                schema: gatewayPlanSchema,
-              }),
-              prompt: buildPrompt(assignment),
-              reasoning: profile.reasoning,
-              system:
-                "You are PacePal, a concise task-planning assistant. Turn broad goals into realistic, executable steps while keeping the user in control.",
+    const remainingTime = deadline - Date.now();
+    if (remainingTime < 3_000) break;
+    const attemptStartedAt = Date.now();
+    try {
+      const requestTimeoutMs = Math.min(
+        profile.timeoutMs,
+        remainingTime - 1_000,
+      );
+      const { output } = await withPlanningTimeout(
+        (abortSignal) =>
+          generateText({
+            abortSignal,
+            maxOutputTokens: 3072,
+            model: planningLanguageModel(profile),
+            // Do not let the SDK multiply one request into several immediate
+            // retries. On free-tier 429/503 responses we move to the deliberately
+            // selected fallback model instead.
+            maxRetries: 0,
+            output: Output.object({
+              description:
+                "A JSON object containing a sequential assignment plan with 4 to 8 tasks.",
+              name: "assignment_plan",
+              schema: gatewayPlanSchema,
             }),
-          requestTimeoutMs,
-        );
+            prompt: buildPrompt(assignment),
+            reasoning: profile.reasoning,
+            system:
+              "You are PacePal, a concise task-planning assistant. Turn broad goals into realistic, executable steps while keeping the user in control.",
+          }),
+        requestTimeoutMs,
+      );
 
-        return {
-          model: publicModelName(profile),
-          subtasks: buildSubtasks(
-            assignment,
-            normalizeGatewayPlan(output).tasks,
-          ),
-        };
-      } catch (error) {
-        const failure = classifyGatewayFailure(error);
-        failures.push({
-          model: publicModelName(profile),
-          provider: profile.provider,
-          reason: failure,
-        });
-        const retrySameProfile =
-          profileAttempt === 0 &&
-          shouldRetryTransientFailure(failure) &&
-          deadline - Date.now() >= 5_000;
-        if (
-          profile.provider === "google" &&
-          shouldStopDirectGoogleFallbacks(error, failure)
-        ) {
-          directGoogleConfigurationFailed = true;
-        }
-        console.warn(
-          `AI planning model ${publicModelName(profile)} failed (${failure}); ${retrySameProfile ? "retrying once" : "trying next model"}. ${gatewayFailureLog(error)}`,
-        );
-        if (retrySameProfile) continue;
-        break;
+      return {
+        model: publicModelName(profile),
+        subtasks: buildSubtasks(assignment, normalizeGatewayPlan(output).tasks),
+      };
+    } catch (error) {
+      const failure = classifyGatewayFailure(error);
+      failures.push({
+        model: publicModelName(profile),
+        provider: profile.provider,
+        reason: failure,
+      });
+      if (
+        profile.provider === "google" &&
+        shouldStopDirectGoogleFallbacks(error, failure)
+      ) {
+        directGoogleConfigurationFailed = true;
       }
+      console.warn(
+        `AI planning model ${publicModelName(profile)} failed (${failure}); trying next model. elapsed=${Date.now() - attemptStartedAt}ms remaining=${Math.max(0, deadline - Date.now())}ms. ${gatewayFailureLog(error)}`,
+      );
     }
   }
 
+  console.error(
+    "AI planning model chain exhausted.",
+    JSON.stringify({
+      durationMs: Date.now() - startedAt,
+      attempts: failures,
+    }),
+  );
   throw planningModelsFailed(failures);
 }
