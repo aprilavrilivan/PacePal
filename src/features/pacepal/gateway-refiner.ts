@@ -86,8 +86,12 @@ export async function generateGatewayRefinement(
   const deadline = Date.now() + 55_000;
   let lastError: unknown;
   let correction = "";
+  let directGoogleAuthenticationFailed = false;
 
   for (const profile of planningModelProfiles()) {
+    if (profile.provider === "google" && directGoogleAuthenticationFailed) {
+      continue;
+    }
     for (let profileAttempt = 0; profileAttempt < 2; profileAttempt += 1) {
       const remainingTime = deadline - Date.now();
       if (remainingTime < 3_000) break;
@@ -197,6 +201,9 @@ export async function generateGatewayRefinement(
           profileAttempt === 0 &&
           failure === "invalid-output" &&
           deadline - Date.now() >= 5_000;
+        if (profile.provider === "google" && failure === "authentication") {
+          directGoogleAuthenticationFailed = true;
+        }
         console.warn(
           `AI refinement model ${publicModelName(profile)} failed (${failure}); ${retrySameProfile ? "retrying with correction" : "trying next model"}. ${gatewayFailureLog(error)}`,
         );

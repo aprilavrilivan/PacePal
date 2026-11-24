@@ -27,6 +27,7 @@ import { buildSubtasks } from "@/features/pacepal/plan-api";
 import { serverEnvironment } from "@/lib/env/server";
 
 export const gatewayModel = "google/gemini-3.8-flash";
+export const directGoogleFallbackModels = ["gemini-3.5-flash-lite"] as const;
 export const gatewayModelProfiles = [
   {
     id: gatewayModel,
@@ -67,20 +68,23 @@ export function planningModelProfiles(): PlanningModelProfile[] {
   const hasDirectGoogle = Boolean(
     serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
   );
+  const directGoogleModelIds = [
+    serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL,
+    ...directGoogleFallbackModels,
+  ].filter((model, index, models) => models.indexOf(model) === index);
   const directGoogle = hasDirectGoogle
-    ? [
-        {
-          id: serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL,
-          provider: "google" as const,
-          reasoning: "high" as const,
-          timeoutMs: 34_000,
-        },
-      ]
+    ? directGoogleModelIds.map((id, index) => ({
+        id,
+        provider: "google" as const,
+        reasoning: "high" as const,
+        timeoutMs: index === 0 ? 32_000 : 15_000,
+      }))
     : [];
 
-  // Do not call the same Gemini model a second time through AI Gateway after
-  // the direct key has already hit a quota/capacity error. Move immediately to
-  // a genuinely independent provider so the user gets a faster recovery.
+  // Avoid retrying the primary Gemini through AI Gateway after the direct
+  // Google path. The direct fallback above can recover from model-specific
+  // capacity or quota pressure; these remaining profiles provide independent
+  // recovery paths for provider-wide failures.
   const gatewayFallbacks = hasDirectGoogle
     ? gatewayModelProfiles.filter((profile) => profile.id !== gatewayModel)
     : [...gatewayModelProfiles];
@@ -136,8 +140,12 @@ export async function generateGatewayPlan(
   const assignment = assignmentInputSchema.parse(input);
   const deadline = Date.now() + 55_000;
   let lastError: unknown;
+  let directGoogleAuthenticationFailed = false;
 
   for (const profile of planningModelProfiles()) {
+    if (profile.provider === "google" && directGoogleAuthenticationFailed) {
+      continue;
+    }
     for (let profileAttempt = 0; profileAttempt < 2; profileAttempt += 1) {
       const remainingTime = deadline - Date.now();
       if (remainingTime < 3_000) break;
@@ -177,6 +185,9 @@ export async function generateGatewayPlan(
           profileAttempt === 0 &&
           failure === "invalid-output" &&
           deadline - Date.now() >= 5_000;
+        if (profile.provider === "google" && failure === "authentication") {
+          directGoogleAuthenticationFailed = true;
+        }
         console.warn(
           `AI planning model ${publicModelName(profile)} failed (${failure}); ${retryStructuredOutput ? "retrying structured output" : "trying next model"}. ${gatewayFailureLog(error)}`,
         );
