@@ -12,7 +12,7 @@ describe("classifyGatewayFailure", () => {
   it.each([
     ["OIDC token is invalid", "authentication"],
     ["Request failed with status 401", "authentication"],
-    ["Request failed with status 403", "configuration"],
+    ["Request failed with status 403", "model-unavailable"],
     ["API is not enabled for this project", "configuration"],
     ["Insufficient credits", "quota"],
     ["429 RESOURCE_EXHAUSTED", "quota"],
@@ -83,7 +83,7 @@ describe("classifyGatewayFailure", () => {
   it("keeps trying Gemini candidates after a generic model-level 403", () => {
     const error = new Error("Request failed with status 403 PERMISSION_DENIED");
 
-    expect(classifyGatewayFailure(error)).toBe("configuration");
+    expect(classifyGatewayFailure(error)).toBe("model-unavailable");
     expect(shouldStopDirectGoogleFallbacks(error)).toBe(false);
   });
 

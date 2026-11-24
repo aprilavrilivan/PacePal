@@ -11,11 +11,11 @@ const failurePatterns = [
   ],
   [
     "configuration",
-    /\b403\b|permission denied|forbidden|service[_ -]?disabled|api has not been used|api is not enabled|access not configured|referer.+blocked/i,
+    /service[_ -]?disabled|api has not been used|api is not enabled|access not configured|referer.+blocked|api[_ -]?key[_ -]?service[_ -]?blocked|project has been denied access|location.+not supported/i,
   ],
   [
     "model-unavailable",
-    /\b404\b|model.+(?:not found|not supported|not available)|not found.+model|no longer available/i,
+    /\b403\b|permission denied|forbidden|\b404\b|model.+(?:not found|not supported|not available)|not found.+model|no longer available/i,
   ],
   [
     "unavailable",
@@ -101,10 +101,9 @@ export function shouldStopDirectGoogleFallbacks(
 
   const text = errorText(error);
 
-  // A bare 403/permission-denied response may be specific to one model or
-  // model release. Continue through the direct Gemini candidates in that
-  // case. Only stop when Google explicitly reports that the whole project or
-  // API service cannot make generation requests.
+  // Configuration is only assigned to explicit project-wide failures. A
+  // model-level 403 is classified as model-unavailable and continues through
+  // the direct Gemini candidates.
   return /service[_ -]?disabled|api has not been used|api is not enabled|access not configured|referer.+blocked|api[_ -]?key[_ -]?service[_ -]?blocked|project has been denied access|location.+not supported/i.test(
     text,
   );

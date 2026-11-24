@@ -105,9 +105,9 @@ export async function generateGatewayRefinement(
             Math.min(profile.timeoutMs, remainingTime - 1_000),
           ),
           maxOutputTokens: 6000,
-          // Retry transient 429/5xx provider responses while the shared
-          // deadline keeps the complete request bounded.
-          maxRetries: 2,
+          // Immediate SDK retries amplify free-tier quota and overload
+          // failures. The bounded model chain is the retry strategy.
+          maxRetries: 0,
           model: planningLanguageModel(profile),
           output: Output.object({
             description:

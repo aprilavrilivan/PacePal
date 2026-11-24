@@ -30,12 +30,7 @@ import { buildSubtasks } from "@/features/pacepal/plan-api";
 import { serverEnvironment } from "@/lib/env/server";
 
 export const gatewayModel = "google/gemini-3.8-flash";
-export const directGoogleFallbackModels = [
-  "gemini-3.7-flash",
-  "gemini-3.6-flash",
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-] as const;
+export const directGoogleFallbackModels = ["gemini-3.5-flash-lite"] as const;
 export const gatewayModelProfiles = [
   {
     id: gatewayModel,
@@ -68,7 +63,7 @@ export type PlanningModelProfile =
   | {
       id: string;
       provider: "google";
-      reasoning: "high";
+      reasoning: "high" | "medium";
       timeoutMs: number;
     };
 
@@ -84,8 +79,8 @@ export function planningModelProfiles(): PlanningModelProfile[] {
     ? directGoogleModelIds.map((id, index) => ({
         id,
         provider: "google" as const,
-        reasoning: "high" as const,
-        timeoutMs: index === 0 ? 18_000 : index === 1 ? 11_000 : 8_000,
+        reasoning: index === 0 ? ("high" as const) : ("medium" as const),
+        timeoutMs: index === 0 ? 24_000 : 18_000,
       }))
     : [];
 
@@ -164,9 +159,10 @@ export async function generateGatewayPlan(
           ),
           maxOutputTokens: 4096,
           model: planningLanguageModel(profile),
-          // The SDK only retries transient provider failures. Keep the outer
-          // deadline as the hard cap so retries cannot make the route hang.
-          maxRetries: 2,
+          // Do not let the SDK multiply one request into several immediate
+          // retries. On free-tier 429/503 responses we move to the deliberately
+          // selected fallback model instead.
+          maxRetries: 0,
           output: Output.object({
             description:
               "A JSON object containing a sequential assignment plan with 4 to 8 tasks.",
