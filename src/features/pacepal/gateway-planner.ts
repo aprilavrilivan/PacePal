@@ -8,7 +8,6 @@ import {
   Output,
   wrapLanguageModel,
 } from "ai";
-import { z } from "zod";
 
 import {
   gatewayPlanSchema,
@@ -30,7 +29,7 @@ import { buildSubtasks } from "@/features/pacepal/plan-api";
 import { withPlanningTimeout } from "@/features/pacepal/planning-timeout";
 import { serverEnvironment } from "@/lib/env/server";
 
-export const gatewayModel = "google/gemini-3.8-flash";
+export const gatewayModel = "google/gemini-3.1-flash-lite";
 export const planningRequestTimeoutMs = 55_000;
 export const planningAttemptTimeoutsMs = [36_000, 16_000] as const;
 export const gatewayModelProfiles = [
@@ -146,23 +145,25 @@ export async function probeDirectGemini(): Promise<DirectGeminiProbe> {
   const attempts: DirectGeminiProbe["attempts"] = [];
   for (const profile of directProfiles) {
     try {
-      await withPlanningTimeout(
+      const google = createGoogle({
+        apiKey: serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
+      });
+      const response = await withPlanningTimeout(
         (abortSignal) =>
           generateText({
             abortSignal,
-            maxOutputTokens: 32,
-            maxRetries: 1,
-            model: planningLanguageModel(profile),
-            output: Output.object({
-              description: "A minimal API connectivity response.",
-              name: "gemini_connectivity_check",
-              schema: z.object({ ok: z.literal(true) }),
-            }),
-            prompt: 'Return exactly one JSON object: {"ok":true}',
-            reasoning: "none",
+            maxOutputTokens: 16,
+            maxRetries: 0,
+            model: google(profile.id),
+            prompt: "Reply with only OK.",
           }),
         10_000,
       );
+      if (!/^OK[.!]?$/i.test(response.text.trim())) {
+        throw new Error(
+          "Gemini connectivity check returned an unexpected response.",
+        );
+      }
       const result: DirectGeminiProbe = {
         attempts,
         configured: true,
@@ -170,7 +171,7 @@ export async function probeDirectGemini(): Promise<DirectGeminiProbe> {
         reachable: true,
       };
       cachedGeminiProbe = {
-        expiresAt: Date.now() + 60_000,
+        expiresAt: Date.now() + 15 * 60_000,
         result,
       };
       return result;
@@ -190,7 +191,7 @@ export async function probeDirectGemini(): Promise<DirectGeminiProbe> {
     reachable: false,
   };
   cachedGeminiProbe = {
-    expiresAt: Date.now() + 30_000,
+    expiresAt: Date.now() + 5 * 60_000,
     result,
   };
   return result;
@@ -273,9 +274,12 @@ export async function generateGatewayPlan(
       });
       const canRetry =
         attemptIndex + 1 < planningAttemptTimeoutsMs.length &&
-        !["authentication", "configuration", "model-unavailable"].includes(
-          failure,
-        );
+        ![
+          "authentication",
+          "configuration",
+          "model-unavailable",
+          "quota",
+        ].includes(failure);
       console.warn(
         `AI planning request ${publicModelName(profile)} failed (${failure}); ${canRetry ? "retrying the same model" : "not retrying"}. elapsed=${Date.now() - attemptStartedAt}ms remaining=${Math.max(0, deadline - Date.now())}ms. ${gatewayFailureLog(error)}`,
       );

@@ -218,9 +218,12 @@ export async function generateGatewayRefinement(
       });
       const canRetry =
         attemptIndex + 1 < planningAttemptTimeoutsMs.length &&
-        !["authentication", "configuration", "model-unavailable"].includes(
-          failure,
-        );
+        ![
+          "authentication",
+          "configuration",
+          "model-unavailable",
+          "quota",
+        ].includes(failure);
       console.warn(
         `AI refinement request ${publicModelName(profile)} failed (${failure}); ${canRetry ? "retrying the same model" : "not retrying"}. elapsed=${Date.now() - attemptStartedAt}ms remaining=${Math.max(0, deadline - Date.now())}ms. ${gatewayFailureLog(error)}`,
       );
