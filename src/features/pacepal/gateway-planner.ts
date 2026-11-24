@@ -15,6 +15,10 @@ import {
 } from "@/features/pacepal/gateway-plan-normalizer";
 import { extractGatewayJson } from "@/features/pacepal/gateway-json";
 import {
+  classifyGatewayFailure,
+  gatewayFailureLog,
+} from "@/features/pacepal/gateway-error";
+import {
   assignmentInputSchema,
   type AssignmentInput,
   type Subtask,
@@ -28,25 +32,25 @@ export const gatewayModelProfiles = [
     id: gatewayModel,
     provider: "gateway" as const,
     reasoning: "high" as const,
-    timeoutMs: 14_000,
+    timeoutMs: 30_000,
   },
   {
     id: "recursive/flint-v1.0",
     provider: "gateway" as const,
     reasoning: "none" as const,
-    timeoutMs: 10_000,
+    timeoutMs: 14_000,
   },
   {
     id: "nvidia/nemotron-3.5-lightning-free",
     provider: "gateway" as const,
     reasoning: "none" as const,
-    timeoutMs: 10_000,
+    timeoutMs: 14_000,
   },
   {
     id: "reflection/beam-free",
     provider: "gateway" as const,
     reasoning: "low" as const,
-    timeoutMs: 8_000,
+    timeoutMs: 12_000,
   },
 ] as const;
 
@@ -69,7 +73,7 @@ export function planningModelProfiles(): PlanningModelProfile[] {
           id: serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL,
           provider: "google" as const,
           reasoning: "high" as const,
-          timeoutMs: 16_000,
+          timeoutMs: 34_000,
         },
       ]
     : [];
@@ -130,41 +134,55 @@ export async function generateGatewayPlan(
   input: AssignmentInput,
 ): Promise<{ model: string; subtasks: Subtask[] }> {
   const assignment = assignmentInputSchema.parse(input);
-  const deadline = Date.now() + 43_000;
+  const deadline = Date.now() + 55_000;
   let lastError: unknown;
 
   for (const profile of planningModelProfiles()) {
-    const remainingTime = deadline - Date.now();
-    if (remainingTime < 3_000) break;
-    try {
-      const { output } = await generateText({
-        abortSignal: AbortSignal.timeout(
-          Math.min(profile.timeoutMs, remainingTime - 1_000),
-        ),
-        maxOutputTokens: 4096,
-        model: planningLanguageModel(profile),
-        maxRetries: 0,
-        output: Output.object({
-          description:
-            "A JSON object containing a sequential assignment plan with 4 to 8 tasks.",
-          name: "assignment_plan",
-          schema: gatewayPlanSchema,
-        }),
-        prompt: buildPrompt(assignment),
-        reasoning: profile.reasoning,
-        system:
-          "You are PacePal, a concise task-planning assistant. Turn broad goals into realistic, executable steps while keeping the user in control.",
-      });
+    for (let profileAttempt = 0; profileAttempt < 2; profileAttempt += 1) {
+      const remainingTime = deadline - Date.now();
+      if (remainingTime < 3_000) break;
+      try {
+        const { output } = await generateText({
+          abortSignal: AbortSignal.timeout(
+            Math.min(profile.timeoutMs, remainingTime - 1_000),
+          ),
+          maxOutputTokens: 4096,
+          model: planningLanguageModel(profile),
+          // The SDK only retries transient provider failures. Keep the outer
+          // deadline as the hard cap so retries cannot make the route hang.
+          maxRetries: 2,
+          output: Output.object({
+            description:
+              "A JSON object containing a sequential assignment plan with 4 to 8 tasks.",
+            name: "assignment_plan",
+            schema: gatewayPlanSchema,
+          }),
+          prompt: buildPrompt(assignment),
+          reasoning: profile.reasoning,
+          system:
+            "You are PacePal, a concise task-planning assistant. Turn broad goals into realistic, executable steps while keeping the user in control.",
+        });
 
-      return {
-        model: publicModelName(profile),
-        subtasks: buildSubtasks(assignment, normalizeGatewayPlan(output).tasks),
-      };
-    } catch (error) {
-      lastError = error;
-      console.warn(
-        `AI planning model ${publicModelName(profile)} failed; trying next model.`,
-      );
+        return {
+          model: publicModelName(profile),
+          subtasks: buildSubtasks(
+            assignment,
+            normalizeGatewayPlan(output).tasks,
+          ),
+        };
+      } catch (error) {
+        lastError = error;
+        const failure = classifyGatewayFailure(error);
+        const retryStructuredOutput =
+          profileAttempt === 0 &&
+          failure === "invalid-output" &&
+          deadline - Date.now() >= 5_000;
+        console.warn(
+          `AI planning model ${publicModelName(profile)} failed (${failure}); ${retryStructuredOutput ? "retrying structured output" : "trying next model"}. ${gatewayFailureLog(error)}`,
+        );
+        if (retryStructuredOutput) continue;
+        break;
+      }
     }
   }
 

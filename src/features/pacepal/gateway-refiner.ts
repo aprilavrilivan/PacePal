@@ -7,7 +7,10 @@ import {
   planningModelProfiles,
   publicModelName,
 } from "@/features/pacepal/gateway-planner";
-import { classifyGatewayFailure } from "@/features/pacepal/gateway-error";
+import {
+  classifyGatewayFailure,
+  gatewayFailureLog,
+} from "@/features/pacepal/gateway-error";
 import { normalizeGatewayRefinement } from "@/features/pacepal/gateway-refinement-normalizer";
 import { recommendNextTask } from "@/features/pacepal/execution";
 import type { Assignment } from "@/features/pacepal/model";
@@ -80,7 +83,7 @@ export async function generateGatewayRefinement(
   assignment: Assignment,
   message: string,
 ): Promise<{ model: string; output: RefinementOutput }> {
-  const deadline = Date.now() + 43_000;
+  const deadline = Date.now() + 55_000;
   let lastError: unknown;
   let correction = "";
 
@@ -95,7 +98,9 @@ export async function generateGatewayRefinement(
             Math.min(profile.timeoutMs, remainingTime - 1_000),
           ),
           maxOutputTokens: 6000,
-          maxRetries: 0,
+          // Retry transient 429/5xx provider responses while the shared
+          // deadline keeps the complete request bounded.
+          maxRetries: 2,
           model: planningLanguageModel(profile),
           output: Output.object({
             description:
@@ -193,7 +198,7 @@ export async function generateGatewayRefinement(
           failure === "invalid-output" &&
           deadline - Date.now() >= 5_000;
         console.warn(
-          `AI refinement model ${publicModelName(profile)} failed (${failure}); ${retrySameProfile ? "retrying with correction" : "trying next model"}.`,
+          `AI refinement model ${publicModelName(profile)} failed (${failure}); ${retrySameProfile ? "retrying with correction" : "trying next model"}. ${gatewayFailureLog(error)}`,
         );
         if (retrySameProfile) continue;
         break;

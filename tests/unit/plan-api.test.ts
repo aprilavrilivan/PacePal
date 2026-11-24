@@ -1,19 +1,44 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyGatewayFailure } from "@/features/pacepal/gateway-error";
+import {
+  classifyGatewayFailure,
+  gatewayFailureLog,
+} from "@/features/pacepal/gateway-error";
 import { buildSubtasks } from "@/features/pacepal/plan-api";
 
 describe("classifyGatewayFailure", () => {
   it.each([
     ["OIDC token is invalid", "authentication"],
+    ["Request failed with status 401", "authentication"],
     ["Insufficient credits", "quota"],
+    ["429 RESOURCE_EXHAUSTED", "quota"],
     ["Request timed out", "timeout"],
+    ["Deadline exceeded while generating content", "timeout"],
     ["Output schema validation failed", "invalid-output"],
     ["ZodError invalid task operation", "invalid-output"],
     ["Provider is unavailable", "unavailable"],
+    ["Request failed with status 503", "unavailable"],
     ["Unexpected failure", "gateway-error"],
   ])("classifies %s", (message, expected) => {
     expect(classifyGatewayFailure(new Error(message))).toBe(expected);
+  });
+
+  it("finds provider status codes in nested SDK causes", () => {
+    const error = Object.assign(new Error("AI request failed"), {
+      cause: { statusCode: 429, data: { error: "RESOURCE_EXHAUSTED" } },
+    });
+
+    expect(classifyGatewayFailure(error)).toBe("quota");
+  });
+
+  it("redacts Google API keys from diagnostics", () => {
+    const apiKey = `AIza${"a".repeat(32)}`;
+    const log = gatewayFailureLog(
+      new Error(`Request failed: https://example.test?key=${apiKey}`),
+    );
+
+    expect(log).not.toContain(apiKey);
+    expect(log).toContain("[redacted]");
   });
 });
 

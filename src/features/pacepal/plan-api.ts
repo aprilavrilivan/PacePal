@@ -9,6 +9,7 @@ import {
 
 export const planApiResponseSchema = z.object({
   fallback: z.boolean(),
+  fallbackReason: z.string().nullable().default(null),
   model: z.string().nullable(),
   subtasks: z.array(subtaskSchema).min(1),
 });
