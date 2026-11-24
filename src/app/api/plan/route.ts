@@ -1,7 +1,10 @@
 import { ZodError } from "zod";
 
 import { generateGatewayPlan } from "@/features/pacepal/gateway-planner";
-import { classifyGatewayFailure } from "@/features/pacepal/gateway-error";
+import {
+  classifyGatewayFailure,
+  planningFailureAttempts,
+} from "@/features/pacepal/gateway-error";
 import { assignmentInputSchema } from "@/features/pacepal/model";
 import { generateMockPlan } from "@/features/pacepal/mock-planner";
 import { serverEnvironment } from "@/lib/env/server";
@@ -34,6 +37,7 @@ export async function POST(request: Request) {
         fallback: true,
         fallbackReason: classifyGatewayFailure(error),
         model: null,
+        providerAttempts: planningFailureAttempts(error),
         subtasks: generateMockPlan(input),
       });
     }

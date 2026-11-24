@@ -19,6 +19,7 @@ on:
       - src/features/pacepal/gateway-refiner.ts
       - src/features/pacepal/mock-refiner.ts
       - src/features/pacepal/model.ts
+      - src/features/pacepal/planning-timeout.ts
       - src/features/pacepal/plan-api.ts
       - src/features/pacepal/refinement.ts
       - src/features/pacepal/refinement-quality.ts
@@ -67,7 +68,9 @@ jobs:
             if ! jq -e '
               .fallback == false and
               (.model == "google/gemini-3.8-flash:direct" or
+                .model == "google/gemini-2.5-flash:direct" or
                 .model == "google/gemini-3.5-flash-lite:direct" or
+                .model == "google/gemini-2.5-flash-lite:direct" or
                 .model == "google/gemini-3.8-flash" or
                 .model == "reflection/beam-free" or
                 .model == "nvidia/nemotron-3.5-lightning-free" or
@@ -109,7 +112,9 @@ jobs:
             if jq -e '
               .fallback == false and
               (.model == "google/gemini-3.8-flash:direct" or
+                .model == "google/gemini-2.5-flash:direct" or
                 .model == "google/gemini-3.5-flash-lite:direct" or
+                .model == "google/gemini-2.5-flash-lite:direct" or
                 .model == "google/gemini-3.8-flash" or
                 .model == "reflection/beam-free" or
                 .model == "nvidia/nemotron-3.5-lightning-free" or
@@ -128,11 +133,12 @@ jobs:
           done
           exit 1
 
-      - name: Probe dynamic replanning behavior
+      - name: Verify progress-aware replanning
         shell: bash
         run: |
-          # The free providers enforce short-window quotas. This pause models a
-          # real chat interval after the initial plan/refinement interaction.
+          # Keep the production probe representative but intentionally small:
+          # free providers enforce short-window quotas, while the broader intent
+          # matrix is covered by deterministic unit tests.
           sleep 30
           deadline="$(date -u -d '+21 days' '+%Y-%m-%dT18:00:00.000Z')"
           assignment="$(jq -n --arg deadline "$deadline" '
@@ -175,61 +181,21 @@ jobs:
             }
           ')"
 
-          probe() {
-            local name="$1"
-            local message="$2"
-            local response
-            response="$(jq -n --argjson assignment "$assignment" --arg message "$message" \
-              '{assignment: $assignment, message: $message}' | \
-              curl -fsS --max-time 90 \
-                -H 'Content-Type: application/json' \
-                --data-binary @- \
-                https://pace-pal-eta.vercel.app/api/refine)"
-            echo "### $name" >> "$GITHUB_STEP_SUMMARY"
-            jq -r '"- fallback: `\(.fallback)`\n- assistant: \(.assistantMessage)\n- operations: `\(.operations | map(.type) | join(", "))`"' \
-              <<<"$response" >> "$GITHUB_STEP_SUMMARY"
-            jq -c '{fallback, model, assistantMessage, operations}' <<<"$response"
-          }
+          remaining="$(jq -n \
+            --argjson assignment "$assignment" \
+            --arg message '我已经完成选题、sources、outline 和 first draft。现在只剩 polish / format check 和 final submission review，其他都做完了，请按实际进度调整，并说明你理解了什么和具体改了什么。' \
+            '{assignment: $assignment, message: $message}' | \
+            curl -fsS --max-time 60 \
+              -H 'Content-Type: application/json' \
+              --data-binary @- \
+              https://pace-pal-eta.vercel.app/api/refine)"
 
-          vague="$(probe \
-            '原计划合理时的模糊请求' \
-            '重新平衡后续任务')"
-          sleep 20
-          explicit="$(probe \
-            '明确要求改变顺序' \
-            '我已经有足够资料可以开始构思。请先写论文大纲，再补充核实史料，然后写初稿，并据此真正调整任务顺序和依赖关系。')"
-          sleep 20
-          blocked="$(probe \
-            '关键任务受阻后的主动调整' \
-            '查找基础史料卡住了，明天才能拿到档案。今天有 120 分钟，请先安排不依赖档案、现在就能推进的工作。')"
-          sleep 20
-          remaining="$(probe \
-            '混合语言的实际剩余范围' \
-            '我已经完成选题、sources、outline 和 first draft。现在只剩 polish / format check 和 final submission review，其他都做完了，请按实际进度调整。')"
-
-          printf 'VAGUE_RESULT=%s\n' "$vague"
-          printf 'EXPLICIT_RESULT=%s\n' "$explicit"
-          printf 'BLOCKED_RESULT=%s\n' "$blocked"
-          printf 'REMAINING_RESULT=%s\n' "$remaining"
+          jq -r '"- fallback: `\(.fallback)`\n- model: `\(.model)`\n- assistant: \(.assistantMessage)\n- operations: `\(.operations | map(.type) | join(", "))`"' \
+            <<<"$remaining" >> "$GITHUB_STEP_SUMMARY"
+          jq -c '{fallback, model, assistantMessage, operations}' <<<"$remaining"
 
           jq -e '
-            (.operations | any(.type == "reschedule")) and
-            (.assistantMessage | contains("顺序保持不变"))
-          ' <<<"$vague" >/dev/null
-          jq -e '
-            (.operations | any(.type == "reorder_tasks")) and
-            (.operations | any(
-              .type == "update_task" and
-              .patch.dependencies != null
-            ))
-          ' <<<"$explicit" >/dev/null
-          jq -e '
-            (.operations | any(
-              .type == "set_status" and
-              .status == "blocked"
-            ))
-          ' <<<"$blocked" >/dev/null
-          jq -e '
+            .fallback == false and
             ([.operations[] | select(.type == "set_status" and .status == "completed") | .taskId]
               | contains(["sources", "outline", "draft"])) and
             (.operations | any(

@@ -144,6 +144,12 @@ export function planningModelsFailed(attempts: PlanningFailureAttempt[]) {
   );
 }
 
+export function planningFailureAttempts(
+  error: unknown,
+): PlanningFailureAttempt[] {
+  return error instanceof PlanningModelsFailedError ? error.attempts : [];
+}
+
 export function gatewayFailureLog(error: unknown) {
   const text = errorText(error)
     .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted-google-api-key]")

@@ -27,34 +27,41 @@ import {
   type Subtask,
 } from "@/features/pacepal/model";
 import { buildSubtasks } from "@/features/pacepal/plan-api";
+import { withPlanningTimeout } from "@/features/pacepal/planning-timeout";
 import { serverEnvironment } from "@/lib/env/server";
 
 export const gatewayModel = "google/gemini-3.8-flash";
-export const directGoogleFallbackModels = ["gemini-3.5-flash-lite"] as const;
+export const directGoogleFallbackModels = [
+  "gemini-2.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-2.5-flash-lite",
+] as const;
+export const planningRequestTimeoutMs = 46_000;
+const directGoogleTimeoutsMs = [12_000, 9_000, 8_000, 7_000] as const;
 export const gatewayModelProfiles = [
   {
     id: gatewayModel,
     provider: "gateway" as const,
     reasoning: "high" as const,
-    timeoutMs: 30_000,
+    timeoutMs: 14_000,
   },
   {
     id: "recursive/flint-v1.0",
     provider: "gateway" as const,
     reasoning: "none" as const,
-    timeoutMs: 14_000,
+    timeoutMs: 9_000,
   },
   {
     id: "nvidia/nemotron-3.5-lightning-free",
     provider: "gateway" as const,
     reasoning: "none" as const,
-    timeoutMs: 14_000,
+    timeoutMs: 9_000,
   },
   {
     id: "reflection/beam-free",
     provider: "gateway" as const,
     reasoning: "low" as const,
-    timeoutMs: 12_000,
+    timeoutMs: 8_000,
   },
 ] as const;
 
@@ -80,7 +87,7 @@ export function planningModelProfiles(): PlanningModelProfile[] {
         id,
         provider: "google" as const,
         reasoning: index === 0 ? ("high" as const) : ("medium" as const),
-        timeoutMs: index === 0 ? 24_000 : 18_000,
+        timeoutMs: directGoogleTimeoutsMs[index] ?? 7_000,
       }))
     : [];
 
@@ -141,7 +148,7 @@ export async function generateGatewayPlan(
   input: AssignmentInput,
 ): Promise<{ model: string; subtasks: Subtask[] }> {
   const assignment = assignmentInputSchema.parse(input);
-  const deadline = Date.now() + 55_000;
+  const deadline = Date.now() + planningRequestTimeoutMs;
   const failures: PlanningFailureAttempt[] = [];
   let directGoogleConfigurationFailed = false;
 
@@ -153,27 +160,33 @@ export async function generateGatewayPlan(
       const remainingTime = deadline - Date.now();
       if (remainingTime < 3_000) break;
       try {
-        const { output } = await generateText({
-          abortSignal: AbortSignal.timeout(
-            Math.min(profile.timeoutMs, remainingTime - 1_000),
-          ),
-          maxOutputTokens: 4096,
-          model: planningLanguageModel(profile),
-          // Do not let the SDK multiply one request into several immediate
-          // retries. On free-tier 429/503 responses we move to the deliberately
-          // selected fallback model instead.
-          maxRetries: 0,
-          output: Output.object({
-            description:
-              "A JSON object containing a sequential assignment plan with 4 to 8 tasks.",
-            name: "assignment_plan",
-            schema: gatewayPlanSchema,
-          }),
-          prompt: buildPrompt(assignment),
-          reasoning: profile.reasoning,
-          system:
-            "You are PacePal, a concise task-planning assistant. Turn broad goals into realistic, executable steps while keeping the user in control.",
-        });
+        const requestTimeoutMs = Math.min(
+          profile.timeoutMs,
+          remainingTime - 1_000,
+        );
+        const { output } = await withPlanningTimeout(
+          (abortSignal) =>
+            generateText({
+              abortSignal,
+              maxOutputTokens: 4096,
+              model: planningLanguageModel(profile),
+              // Do not let the SDK multiply one request into several immediate
+              // retries. On free-tier 429/503 responses we move to the deliberately
+              // selected fallback model instead.
+              maxRetries: 0,
+              output: Output.object({
+                description:
+                  "A JSON object containing a sequential assignment plan with 4 to 8 tasks.",
+                name: "assignment_plan",
+                schema: gatewayPlanSchema,
+              }),
+              prompt: buildPrompt(assignment),
+              reasoning: profile.reasoning,
+              system:
+                "You are PacePal, a concise task-planning assistant. Turn broad goals into realistic, executable steps while keeping the user in control.",
+            }),
+          requestTimeoutMs,
+        );
 
         return {
           model: publicModelName(profile),

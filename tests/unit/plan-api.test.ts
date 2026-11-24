@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyGatewayFailure,
   gatewayFailureLog,
+  planningFailureAttempts,
   planningModelsFailed,
   shouldStopDirectGoogleFallbacks,
 } from "@/features/pacepal/gateway-error";
@@ -61,6 +62,13 @@ describe("classifyGatewayFailure", () => {
     ]);
 
     expect(classifyGatewayFailure(error)).toBe("unavailable");
+    expect(planningFailureAttempts(error)).toHaveLength(2);
+  });
+
+  it("does not expose arbitrary error details as provider attempts", () => {
+    expect(
+      planningFailureAttempts(new Error("secret provider detail")),
+    ).toEqual([]);
   });
 
   it("prioritizes an invalid direct key over fallback failures", () => {

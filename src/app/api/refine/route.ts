@@ -1,7 +1,10 @@
 import { ZodError } from "zod";
 
 import { refinementFallback } from "@/features/pacepal/ai-fallback";
-import { classifyGatewayFailure } from "@/features/pacepal/gateway-error";
+import {
+  classifyGatewayFailure,
+  planningFailureAttempts,
+} from "@/features/pacepal/gateway-error";
 import { normalizeGatewayRefinement } from "@/features/pacepal/gateway-refinement-normalizer";
 import { generateGatewayRefinement } from "@/features/pacepal/gateway-refiner";
 import { generateMockRefinement } from "@/features/pacepal/mock-refiner";
@@ -41,9 +44,10 @@ export async function POST(request: Request) {
       });
     } catch (error) {
       console.error("AI Gateway refinement failed", error);
-      return Response.json(
-        refinementFallback(mockOutput, classifyGatewayFailure(error)),
-      );
+      return Response.json({
+        ...refinementFallback(mockOutput, classifyGatewayFailure(error)),
+        providerAttempts: planningFailureAttempts(error),
+      });
     }
   } catch (error) {
     if (error instanceof ZodError || error instanceof SyntaxError) {
