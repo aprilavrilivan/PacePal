@@ -218,7 +218,7 @@ export async function generateGatewayRefinement(
         });
         const retrySameProfile =
           profileAttempt === 0 &&
-          failure === "invalid-output" &&
+          (failure === "invalid-output" || failure === "unavailable") &&
           deadline - Date.now() >= 5_000;
         if (
           profile.provider === "google" &&

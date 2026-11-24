@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createGoogle } from "@ai-sdk/google";
+import { createGoogle, type GoogleInteractionsModelId } from "@ai-sdk/google";
 import {
   extractJsonMiddleware,
   gateway,
@@ -8,6 +8,7 @@ import {
   Output,
   wrapLanguageModel,
 } from "ai";
+import { z } from "zod";
 
 import {
   gatewayPlanSchema,
@@ -32,12 +33,12 @@ import { serverEnvironment } from "@/lib/env/server";
 
 export const gatewayModel = "google/gemini-3.8-flash";
 export const directGoogleFallbackModels = [
-  "gemini-2.5-flash",
+  "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
-  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
 ] as const;
 export const planningRequestTimeoutMs = 46_000;
-const directGoogleTimeoutsMs = [12_000, 9_000, 8_000, 7_000] as const;
+const directGoogleTimeoutsMs = [12_000, 10_000, 8_000, 7_000, 6_000] as const;
 export const gatewayModelProfiles = [
   {
     id: gatewayModel,
@@ -72,19 +73,40 @@ export type PlanningModelProfile =
       provider: "google";
       reasoning: "high" | "medium";
       timeoutMs: number;
+      transport: "interactions" | "generate-content";
     };
 
 export function planningModelProfiles(): PlanningModelProfile[] {
   const hasDirectGoogle = Boolean(
     serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
   );
-  const directGoogleModelIds = [
-    serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL,
-    ...directGoogleFallbackModels,
-  ].filter((model, index, models) => models.indexOf(model) === index);
+  const configuredModel = serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL;
+  const directGoogleCandidates = [
+    // Gemini 3.8 is exposed through Google's Interactions API. Keep the
+    // generateContent route immediately behind it because Google can roll out
+    // access to the two endpoints independently for the same project/key.
+    {
+      id: configuredModel,
+      transport: "interactions" as const,
+    },
+    {
+      id: configuredModel,
+      transport: "generate-content" as const,
+    },
+    ...directGoogleFallbackModels.map((id) => ({
+      id,
+      transport: "generate-content" as const,
+    })),
+  ].filter(
+    (candidate, index, candidates) =>
+      candidates.findIndex(
+        (value) =>
+          value.id === candidate.id && value.transport === candidate.transport,
+      ) === index,
+  );
   const directGoogle = hasDirectGoogle
-    ? directGoogleModelIds.map((id, index) => ({
-        id,
+    ? directGoogleCandidates.map((candidate, index) => ({
+        ...candidate,
         provider: "google" as const,
         reasoning: index === 0 ? ("high" as const) : ("medium" as const),
         timeoutMs: directGoogleTimeoutsMs[index] ?? 7_000,
@@ -104,17 +126,23 @@ export function planningModelProfiles(): PlanningModelProfile[] {
 
 export function publicModelName(profile: PlanningModelProfile) {
   return profile.provider === "google"
-    ? `google/${profile.id}:direct`
+    ? `google/${profile.id}:${profile.transport}`
     : profile.id;
 }
 
 export function planningLanguageModel(profile: PlanningModelProfile) {
-  const model =
-    profile.provider === "google"
-      ? createGoogle({
-          apiKey: serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
-        })(profile.id)
-      : gateway(profile.id);
+  let model;
+  if (profile.provider === "google") {
+    const google = createGoogle({
+      apiKey: serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
+    });
+    model =
+      profile.transport === "interactions"
+        ? google.interactions(profile.id as GoogleInteractionsModelId)
+        : google(profile.id);
+  } else {
+    model = gateway(profile.id);
+  }
 
   return wrapLanguageModel({
     middleware: extractJsonMiddleware({
@@ -122,6 +150,103 @@ export function planningLanguageModel(profile: PlanningModelProfile) {
     }),
     model,
   });
+}
+
+export type DirectGeminiProbe = {
+  attempts: Array<{
+    model: string;
+    reason: ReturnType<typeof classifyGatewayFailure>;
+  }>;
+  configured: boolean;
+  model: string | null;
+  reachable: boolean;
+};
+
+let cachedGeminiProbe:
+  | {
+      expiresAt: number;
+      result: DirectGeminiProbe;
+    }
+  | undefined;
+
+export async function probeDirectGemini(): Promise<DirectGeminiProbe> {
+  if (cachedGeminiProbe && cachedGeminiProbe.expiresAt > Date.now()) {
+    return cachedGeminiProbe.result;
+  }
+
+  const directProfiles = planningModelProfiles()
+    .filter(
+      (
+        profile,
+      ): profile is Extract<PlanningModelProfile, { provider: "google" }> =>
+        profile.provider === "google",
+    )
+    .slice(0, 3);
+  if (directProfiles.length === 0) {
+    return {
+      attempts: [],
+      configured: false,
+      model: null,
+      reachable: false,
+    };
+  }
+
+  const attempts: DirectGeminiProbe["attempts"] = [];
+  for (const profile of directProfiles) {
+    try {
+      await withPlanningTimeout(
+        (abortSignal) =>
+          generateText({
+            abortSignal,
+            maxOutputTokens: 32,
+            maxRetries: 0,
+            model: planningLanguageModel(profile),
+            output: Output.object({
+              description: "A minimal API connectivity response.",
+              name: "gemini_connectivity_check",
+              schema: z.object({ ok: z.literal(true) }),
+            }),
+            prompt: 'Return exactly one JSON object: {"ok":true}',
+            reasoning: "none",
+          }),
+        5_000,
+      );
+      const result: DirectGeminiProbe = {
+        attempts,
+        configured: true,
+        model: publicModelName(profile),
+        reachable: true,
+      };
+      cachedGeminiProbe = {
+        expiresAt: Date.now() + 60_000,
+        result,
+      };
+      return result;
+    } catch (error) {
+      attempts.push({
+        model: publicModelName(profile),
+        reason: classifyGatewayFailure(error),
+      });
+    }
+  }
+
+  const result: DirectGeminiProbe = {
+    attempts,
+    configured: true,
+    model: null,
+    reachable: false,
+  };
+  cachedGeminiProbe = {
+    expiresAt: Date.now() + 30_000,
+    result,
+  };
+  return result;
+}
+
+function shouldRetryTransientFailure(
+  failure: ReturnType<typeof classifyGatewayFailure>,
+) {
+  return failure === "invalid-output" || failure === "unavailable";
 }
 
 function buildPrompt(assignment: AssignmentInput) {
@@ -202,9 +327,9 @@ export async function generateGatewayPlan(
           provider: profile.provider,
           reason: failure,
         });
-        const retryStructuredOutput =
+        const retrySameProfile =
           profileAttempt === 0 &&
-          failure === "invalid-output" &&
+          shouldRetryTransientFailure(failure) &&
           deadline - Date.now() >= 5_000;
         if (
           profile.provider === "google" &&
@@ -213,9 +338,9 @@ export async function generateGatewayPlan(
           directGoogleConfigurationFailed = true;
         }
         console.warn(
-          `AI planning model ${publicModelName(profile)} failed (${failure}); ${retryStructuredOutput ? "retrying structured output" : "trying next model"}. ${gatewayFailureLog(error)}`,
+          `AI planning model ${publicModelName(profile)} failed (${failure}); ${retrySameProfile ? "retrying once" : "trying next model"}. ${gatewayFailureLog(error)}`,
         );
-        if (retryStructuredOutput) continue;
+        if (retrySameProfile) continue;
         break;
       }
     }
