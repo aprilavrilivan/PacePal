@@ -31,9 +31,11 @@ export const draftPhaseSchema = z.object({
 
 export const initialPlanDecisionSchema = z.object({
   language: planningLanguageSchema,
+  needsClarification: z.boolean(),
+  clarifyingQuestion: z.string().trim().min(1).max(600).nullable(),
   taskUnderstanding: z.string().trim().min(1).max(1200),
   assumptions: z.array(z.string().trim().min(1).max(300)).max(6),
-  phases: z.array(draftPhaseSchema).min(1).max(8),
+  phases: z.array(draftPhaseSchema).max(8),
 });
 
 const taskPatchSchema = z
@@ -156,16 +158,34 @@ export const modelUsageSchema = z.object({
   totalTokens: z.number().int().nonnegative(),
 });
 
-export const planApiResponseSchema = z.object({
-  model: z.string().min(1),
-  usage: modelUsageSchema,
-  language: planningLanguageSchema,
-  assistantMessage: z.string().trim().min(1),
-  assumptions: z.array(z.string()),
-  planVersion: z.number().int().positive(),
-  planHistory: z.array(planChangeSchema),
-  subtasks: z.array(subtaskSchema).min(1),
-});
+export const planApiResponseSchema = z
+  .object({
+    model: z.string().min(1),
+    usage: modelUsageSchema,
+    needsClarification: z.boolean(),
+    language: planningLanguageSchema,
+    assistantMessage: z.string().trim().min(1),
+    assumptions: z.array(z.string()),
+    planVersion: z.number().int().positive(),
+    planHistory: z.array(planChangeSchema),
+    subtasks: z.array(subtaskSchema),
+  })
+  .superRefine((value, context) => {
+    if (value.needsClarification && value.subtasks.length > 0) {
+      context.addIssue({
+        code: "custom",
+        message: "A clarification response must not include tasks.",
+        path: ["subtasks"],
+      });
+    }
+    if (!value.needsClarification && value.subtasks.length === 0) {
+      context.addIssue({
+        code: "custom",
+        message: "A plan response must include tasks.",
+        path: ["subtasks"],
+      });
+    }
+  });
 
 export const refinementApiResponseSchema = z.object({
   model: z.string().min(1),

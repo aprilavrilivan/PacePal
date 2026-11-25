@@ -41,6 +41,7 @@ async function mockPlanningApi(page: Page) {
           cacheReadTokens: 0,
           totalTokens: 0,
         },
+        needsClarification: false,
         language: "zh",
         assistantMessage: "我已理解任务要求，并按依赖关系生成计划。",
         assumptions: [],
@@ -347,6 +348,60 @@ test("shows model unavailable without creating a fallback plan", async ({
 
   await expect(
     page.getByText("当前 AI 模型不可用，请稍后重试。"),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "确认任务计划" })).toHaveCount(
+    0,
+  );
+});
+
+test("asks one clarification without creating a fabricated plan", async ({
+  page,
+}) => {
+  await page.route("**/api/plan", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        model: "deepseek/deepseek-v4.1-flash-1017",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 40,
+          reasoningTokens: 10,
+          cacheReadTokens: 0,
+          totalTokens: 140,
+        },
+        needsClarification: true,
+        language: "zh",
+        assistantMessage:
+          "这个课程项目最终需要提交什么成果，例如论文、展示还是软件？",
+        assumptions: [],
+        planVersion: 1,
+        planHistory: [],
+        subtasks: [],
+      }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
+
+  await page.getByRole("button", { name: "创建任务" }).click();
+  await page.getByLabel("任务名称").fill("课程项目");
+  await page.getByLabel("任务要求").fill("下周前完成，但要求还不清楚。");
+  await page.getByLabel("成果形式").fill("尚未确定");
+  const deadline = new Date();
+  deadline.setDate(deadline.getDate() + 7);
+  await page
+    .getByLabel("截止时间")
+    .fill(
+      `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`,
+    );
+  await page.getByRole("button", { name: "保存并生成任务" }).click();
+
+  await expect(
+    page.getByText(
+      "这个课程项目最终需要提交什么成果，例如论文、展示还是软件？",
+    ),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "确认任务计划" })).toHaveCount(
     0,

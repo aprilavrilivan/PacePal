@@ -35,6 +35,8 @@ function draftTask(
 
 const initialDecision: InitialPlanDecision = {
   language: "en",
+  needsClarification: false,
+  clarifyingQuestion: null,
   taskUnderstanding: "Complete the research paper in dependency order.",
   assumptions: [],
   phases: [
@@ -97,6 +99,8 @@ describe("initial plan materialization", () => {
   it("rejects missing and circular dependency references", () => {
     const decision: InitialPlanDecision = {
       language: "en",
+      needsClarification: false,
+      clarifyingQuestion: null,
       taskUnderstanding: "A deliberately invalid plan.",
       assumptions: [],
       phases: [

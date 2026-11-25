@@ -29,7 +29,7 @@ import {
 import { withPlanningTimeout } from "@/features/pacepal/planning/timeout";
 
 export const planningModel = "deepseek/deepseek-v4.1-flash-1017";
-export const planningRequestTimeoutMs = 55_000;
+export const planningRequestTimeoutMs = 80_000;
 
 function modelUsage(usage: LanguageModelUsage): ModelUsage {
   return {
@@ -103,7 +103,7 @@ export async function generateLiveInitialPlan(
     generate: async (abortSignal) => {
       const response = await generateText({
         abortSignal,
-        maxOutputTokens: 6000,
+        maxOutputTokens: 8000,
         maxRetries: 0,
         model: gateway(planningModel),
         output: Output.object({
@@ -118,6 +118,18 @@ export async function generateLiveInitialPlan(
       return { usage: response.usage, value: response.output };
     },
     validate: (value) => {
+      if (value.needsClarification) {
+        if (!value.clarifyingQuestion) {
+          return "A clarification decision must include one question.";
+        }
+        if (value.phases.length > 0) {
+          return "A clarification decision must not include plan phases.";
+        }
+        return "";
+      }
+      if (value.clarifyingQuestion) {
+        return "A plan decision must not include a clarification question.";
+      }
       try {
         validateDraftPhases(value.phases);
         return "";
@@ -148,7 +160,7 @@ export async function generateLiveRefinement(
     generate: async (abortSignal) => {
       const response = await generateText({
         abortSignal,
-        maxOutputTokens: 6000,
+        maxOutputTokens: 8000,
         maxRetries: 0,
         model: gateway(planningModel),
         output: Output.object({
@@ -193,7 +205,7 @@ export async function probePlanningModel(): Promise<PlanningModelProbe> {
         }),
       10_000,
     );
-    const reachable = /^OK[.!]?$/i.test(text.trim());
+    const reachable = text.trim().length > 0;
     return {
       configured: true,
       model: planningModel,

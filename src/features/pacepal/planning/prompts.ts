@@ -24,12 +24,15 @@ export function initialPlanSystemPrompt() {
   return `${sharedRules}
 
 You are producing an initial plan proposal.
-- Create 2 to 6 coherent phases and 4 to 16 tasks in total, adapting the count to actual complexity.
+- First decide whether the objective and deliverable are specific enough to plan without inventing them.
+- If a critical detail such as the deliverable type, topic, or assignment requirements is missing, set needsClarification=true, ask exactly one focused question in clarifyingQuestion, keep phases empty, and do not fabricate a plan. Put the same concise explanation in taskUnderstanding.
+- Otherwise set needsClarification=false, clarifyingQuestion=null, and create 2 to 6 coherent phases with 4 to 12 tasks in total.
 - tempId values must be short, unique, stable semantic identifiers such as research-sources or draft-introduction.
 - Task dependency values must reference tempId values from this same response.
 - Do not force every task into a single chain when work can genuinely proceed in parallel.
 - taskUnderstanding should briefly restate the objective, deliverable, scope, and deadline.
 - assumptions should contain only non-critical assumptions you actually made; use an empty array if none.
+- Keep each task description under 300 characters and each completion criterion under 180 characters.
 `;
 }
 
@@ -55,14 +58,16 @@ Decision rules:
 - For a question or unrelated discussion, answer naturally and return no operations unless the user clearly asks for a saved-plan change.
 - For an overwhelmed user, give one small next action and avoid adding a large set of tasks.
 - For progress reports, change status only when the statement clearly supports it. If statements conflict, ask for clarification and return no operations.
+- For a progress report, do not add, split, merge, delete, or rewrite tasks unless the user explicitly asks for a plan change in the same message. Never infer missing downstream tasks from a status update.
 - For plan changes, make the smallest sufficient set of operations and preserve unaffected task IDs and completed work.
 - Never update, delete, split, or merge a completed task. Use reopen_task only when the user explicitly corrects a completed status.
 - Use exact existing task IDs for existing tasks. New tasks need unique tempId values beginning with new-; dependencies may reference existing IDs or new tempIds from this response.
 - add_task, split_task, and merge_tasks descriptions must contain all fields. Use phase names consistent with the plan unless the user requests a new phase.
 - reorder_tasks may name only unfinished tasks and should include only the tasks whose relative order must change.
 - Include reschedule when status, dependency, duration, order, deadline, or availability changes should rebuild the calendar.
+- If the remaining work exceeds the user's stated available time, explain the numeric gap and realistic options, ask which option they prefer, and return no operations. Do not reduce task estimates, scope, or quality before the user chooses.
 - assistantMessage must accurately describe only changes represented by operations.
-- If a deletion, merge, broad scope replacement, or other destructive change is not already confirmed in the recent conversation, set confirmation=requested, ask one focused confirmation question in assistantMessage, and return no operations.
+- An explicit user request to rebuild or replace unfinished work is already confirmation; preserve completed tasks and rebuild only unfinished work. For a deletion, merge, or destructive change that is merely implied or proposed by you, set confirmation=requested, ask one focused confirmation question in assistantMessage, and return no operations.
 - When the user's latest message explicitly confirms the immediately preceding assistant proposal, set confirmation=confirmed and return the previously proposed operations.
 - Otherwise use confirmation=not_required.
 `;

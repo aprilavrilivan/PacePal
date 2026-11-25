@@ -20,9 +20,23 @@ export async function createTaskPlan(
   assignment: AssignmentInput,
 ): Promise<PlanApiResponse> {
   const result = await generateLiveInitialPlan(assignment);
+  if (result.decision.needsClarification) {
+    return {
+      model: result.model,
+      usage: result.usage,
+      needsClarification: true,
+      language: result.decision.language,
+      assistantMessage: result.decision.clarifyingQuestion!,
+      assumptions: [],
+      planVersion: 1,
+      planHistory: [],
+      subtasks: [],
+    };
+  }
   return {
     model: result.model,
     usage: result.usage,
+    needsClarification: false,
     ...materializeInitialPlan(assignment, result.decision),
   };
 }

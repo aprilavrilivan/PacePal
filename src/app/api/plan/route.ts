@@ -5,7 +5,7 @@ import { PlanningProviderError } from "@/features/pacepal/planning/provider-erro
 import { createTaskPlan } from "@/features/pacepal/planning/service";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 export async function POST(request: Request) {
   try {

@@ -202,6 +202,7 @@ export function PacePalApp() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [planError, setPlanError] = useState("");
+  const [planClarification, setPlanClarification] = useState("");
   const [planBusy, setPlanBusy] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [cloudReady, setCloudReady] = useState(false);
@@ -470,6 +471,7 @@ export function PacePalApp() {
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
     setPlanError("");
+    setPlanClarification("");
 
     if (formMode === "edit" && assignment) {
       const planningFieldsChanged =
@@ -531,6 +533,11 @@ export function PacePalApp() {
       return;
     }
     setPlanBusy(false);
+
+    if (plan.needsClarification) {
+      setPlanClarification(plan.assistantMessage);
+      return;
+    }
 
     const nextAssignment: Assignment = {
       ...form,
@@ -1308,6 +1315,14 @@ export function PacePalApp() {
             {planError ? (
               <p className="text-sm font-medium text-red-700" role="alert">
                 {planError}
+              </p>
+            ) : null}
+            {planClarification ? (
+              <p
+                className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900"
+                role="status"
+              >
+                {planClarification}
               </p>
             ) : null}
 
