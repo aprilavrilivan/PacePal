@@ -36,7 +36,7 @@ export const planningAttemptTimeoutsMs = [36_000, 16_000] as const;
 export type ModelProfile = {
   id: string;
   provider: "google" | "gateway";
-  reasoning: "high" | "medium" | "low";
+  reasoning: "high" | "medium" | "low" | "none";
   timeoutMs: number;
   transport?: "generate-content" | "interactions";
 };
@@ -84,13 +84,13 @@ export function planningModelProfiles(): ModelProfile[] {
     {
       id: "nvidia/nemotron-3.5-lightning-free",
       provider: "gateway",
-      reasoning: "low",
+      reasoning: "none",
       timeoutMs: 24_000,
     },
     {
       id: "recursive/flint-v1.0",
       provider: "gateway",
-      reasoning: "low",
+      reasoning: "none",
       timeoutMs: 14_000,
     },
     {
@@ -218,7 +218,10 @@ export async function generateLiveInitialPlan(
     run: async (profile, abortSignal, feedback) => {
       const { output } = await generateText({
         abortSignal,
-        maxOutputTokens: 6000,
+        maxOutputTokens:
+          profile.provider === "gateway" && profile.reasoning === "none"
+            ? 3500
+            : 6000,
         maxRetries: 0,
         model: languageModel(profile),
         output: Output.object({
@@ -263,7 +266,10 @@ export async function generateLiveRefinement(
     run: async (profile, abortSignal, feedback) => {
       const { output } = await generateText({
         abortSignal,
-        maxOutputTokens: 6000,
+        maxOutputTokens:
+          profile.provider === "gateway" && profile.reasoning === "none"
+            ? 3500
+            : 6000,
         maxRetries: 0,
         model: languageModel(profile),
         output: Output.object({
