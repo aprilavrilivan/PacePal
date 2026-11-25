@@ -27,7 +27,6 @@ import {
   refinementUserPrompt,
 } from "@/features/pacepal/planning/prompts";
 import { withPlanningTimeout } from "@/features/pacepal/planning/timeout";
-import { serverEnvironment } from "@/lib/env/server";
 
 export const planningModel = "deepseek/deepseek-v4.1-flash-1017";
 export const planningRequestTimeoutMs = 55_000;
@@ -182,18 +181,6 @@ export type PlanningModelProbe = {
 };
 
 export async function probePlanningModel(): Promise<PlanningModelProbe> {
-  const configured = Boolean(
-    serverEnvironment.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN,
-  );
-  if (!configured) {
-    return {
-      configured: false,
-      model: planningModel,
-      reachable: false,
-      reason: "configuration",
-    };
-  }
-
   try {
     const { text } = await withPlanningTimeout(
       (abortSignal) =>
@@ -214,11 +201,12 @@ export async function probePlanningModel(): Promise<PlanningModelProbe> {
       reason: reachable ? null : "Unexpected probe response.",
     };
   } catch (error) {
+    const reason = classifyPlanningFailure(error);
     return {
-      configured: true,
+      configured: !["authentication", "configuration"].includes(reason),
       model: planningModel,
       reachable: false,
-      reason: classifyPlanningFailure(error),
+      reason,
     };
   }
 }

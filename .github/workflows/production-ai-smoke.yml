@@ -15,7 +15,6 @@ on:
       - src/features/pacepal/model.ts
       - src/features/pacepal/planning/**
       - src/features/pacepal/scheduler.ts
-      - src/lib/env/server.ts
 
 permissions:
   contents: read
