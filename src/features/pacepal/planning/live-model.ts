@@ -85,7 +85,19 @@ export function planningModelProfiles(): ModelProfile[] {
       id: "nvidia/nemotron-3.5-lightning-free",
       provider: "gateway",
       reasoning: "low",
-      timeoutMs: 8_000,
+      timeoutMs: 24_000,
+    },
+    {
+      id: "recursive/flint-v1.0",
+      provider: "gateway",
+      reasoning: "low",
+      timeoutMs: 14_000,
+    },
+    {
+      id: "reflection/beam-free",
+      provider: "gateway",
+      reasoning: "low",
+      timeoutMs: 10_000,
     },
   );
   return profiles.filter(
