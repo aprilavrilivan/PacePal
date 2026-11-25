@@ -152,6 +152,13 @@ export const planApiResponseSchema = z.object({
   fallback: z.boolean(),
   fallbackReason: z.string().nullable(),
   model: z.string().nullable(),
+  providerAttempts: z.array(
+    z.object({
+      model: z.string(),
+      provider: z.enum(["google", "gateway"]),
+      reason: z.string(),
+    }),
+  ),
   language: planningLanguageSchema,
   assistantMessage: z.string().trim().min(1),
   assumptions: z.array(z.string()),
@@ -164,6 +171,13 @@ export const refinementApiResponseSchema = z.object({
   fallback: z.boolean(),
   fallbackReason: z.string().nullable(),
   model: z.string().nullable(),
+  providerAttempts: z.array(
+    z.object({
+      model: z.string(),
+      provider: z.enum(["google", "gateway"]),
+      reason: z.string(),
+    }),
+  ),
   assistantMessage: z.string().trim().min(1),
   changed: z.boolean(),
   confirmationRequired: z.boolean(),

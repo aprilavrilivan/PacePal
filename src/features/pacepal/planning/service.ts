@@ -20,7 +20,11 @@ import {
   generateMockInitialDecision,
   generateMockRefinementDecision,
 } from "@/features/pacepal/planning/mock-model";
-import { providerFailureReason } from "@/features/pacepal/planning/provider-error";
+import {
+  providerFailureAttempts,
+  providerFailureReason,
+  type PlanningFailureAttempt,
+} from "@/features/pacepal/planning/provider-error";
 import { serverEnvironment } from "@/lib/env/server";
 
 export async function createTaskPlan(
@@ -29,6 +33,7 @@ export async function createTaskPlan(
   let fallback = false;
   let fallbackReason: string | null = null;
   let model: string | null = null;
+  let providerAttempts: PlanningFailureAttempt[] = [];
   let decision;
 
   if (serverEnvironment.AI_PROVIDER === "mock") {
@@ -45,6 +50,7 @@ export async function createTaskPlan(
       );
       fallback = true;
       fallbackReason = providerFailureReason(error);
+      providerAttempts = providerFailureAttempts(error);
       decision = generateMockInitialDecision(assignment);
     }
   }
@@ -53,6 +59,7 @@ export async function createTaskPlan(
     fallback,
     fallbackReason,
     model,
+    providerAttempts,
     ...materializeInitialPlan(assignment, decision),
   };
 }
@@ -71,6 +78,7 @@ function unchangedResponse(
     fallback: boolean;
     fallbackReason: string | null;
     model: string | null;
+    providerAttempts: PlanningFailureAttempt[];
   },
 ): RefinementApiResponse {
   return {
@@ -116,6 +124,7 @@ export async function refineTaskPlan(
           fallback: true,
           fallbackReason: providerFailureReason(error),
           model: null,
+          providerAttempts: providerFailureAttempts(error),
         },
       );
     }
@@ -129,6 +138,7 @@ export async function refineTaskPlan(
       fallback: false,
       fallbackReason: null,
       model,
+      providerAttempts: [],
     });
   }
 
@@ -141,6 +151,7 @@ export async function refineTaskPlan(
     fallback: false,
     fallbackReason: null,
     model,
+    providerAttempts: [],
     assistantMessage: decision.assistantMessage,
     changed: result.changed,
     confirmationRequired: false,
