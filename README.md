@@ -35,7 +35,7 @@ Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 - Zod environment validation
 - Zod plan and persisted-state validation
 - Supabase Auth, Postgres, and row-level security
-- Gemini task planning through Google AI or Vercel AI Gateway
+- DeepSeek V4.1 Flash 1017 task planning through Vercel AI Gateway
 - Strict, versioned plan-operation protocol with deterministic validation
 - Deterministic scheduling engine
 - Vitest and Testing Library

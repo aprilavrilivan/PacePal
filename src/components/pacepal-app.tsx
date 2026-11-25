@@ -501,7 +501,7 @@ export function PacePalApp() {
           updateAssignment((current) =>
             rebuildAssignmentSchedule(
               { ...current, ...form },
-              "任务信息已更新；AI 暂时不可用，原任务已保留",
+              "任务信息已更新；当前 AI 模型不可用，原任务已保留",
             ),
           );
         }
@@ -1029,13 +1029,17 @@ export function PacePalApp() {
           chatMessages: [...next.chatMessages, assistantMessage],
         };
       });
-    } catch {
+    } catch (error) {
+      const failureMessage =
+        error instanceof Error
+          ? error.message
+          : "当前 AI 模型不可用，请稍后重试。";
       updateAssignment((current) => ({
         ...current,
         chatMessages: [
           ...current.chatMessages,
           {
-            content: "暂时无法连接 AI，你的计划没有变化。",
+            content: `${failureMessage} 你的计划没有变化。`,
             createdAt: new Date().toISOString(),
             id: createId("message"),
             role: "assistant",
@@ -1300,6 +1304,12 @@ export function PacePalApp() {
                 </select>
               </FormField>
             </div>
+
+            {planError ? (
+              <p className="text-sm font-medium text-red-700" role="alert">
+                {planError}
+              </p>
+            ) : null}
 
             <div className="flex justify-end pt-2">
               <button

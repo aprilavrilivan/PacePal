@@ -1,17 +1,17 @@
 import { appConfig } from "@/lib/app-config";
-import { probePlanningModel } from "@/features/pacepal/planning/live-model";
-import { serverEnvironment } from "@/lib/env/server";
+import {
+  planningModel,
+  probePlanningModel,
+} from "@/features/pacepal/planning/live-model";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const health = {
-    aiProvider: serverEnvironment.AI_PROVIDER,
     app: appConfig.name,
     commitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
-    directGeminiConfigured: Boolean(
-      serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
-    ),
+    planningModel,
+    provider: "vercel-ai-gateway",
     status: "ok",
   };
 
@@ -20,8 +20,7 @@ export async function GET(request: Request) {
   }
 
   const planningModelProbe = await probePlanningModel();
-  const degraded =
-    planningModelProbe.configured && !planningModelProbe.reachable;
+  const degraded = !planningModelProbe.reachable;
 
   return Response.json(
     {

@@ -38,11 +38,11 @@ These decisions convert the product brief into an implementation boundary. Chang
 
 **Reason:** The product supports student agency and academic integrity.
 
-## PD-007 — Demo mode is a release requirement
+## PD-007 — Test fixtures stay outside production runtime
 
-**Decision:** A deterministic mock AI provider must allow the complete workflow to be tested without external model credentials.
+**Decision:** Browser tests intercept AI HTTP requests with deterministic fixtures. Production runtime contains no mock provider.
 
-**Reason:** Development, automated testing, review, and fallback behavior must not depend on a live paid service.
+**Reason:** Automated tests use test-only fixtures and never add a synthetic provider to production runtime code.
 
 ## PD-008 — In-app reminders only for MVP
 
@@ -126,8 +126,8 @@ These decisions convert the product brief into an implementation boundary. Chang
 
 **Reason:** Model output is a proposal, not trusted state. Versioning makes changes auditable, while fail-closed behavior prevents a malformed response or heuristic fallback from corrupting completed work.
 
-## PD-020 — Configurable Gemini planning adapter
+## PD-020 — One production planning model
 
-**Decision:** Live planning uses the configured Gemini model either directly through Google AI or through Vercel AI Gateway. Provider-specific setup is isolated in one server-only adapter; plan contracts, validation, persistence, and scheduling do not depend on the transport.
+**Decision:** Live planning makes one request to DeepSeek V4.1 Flash 1017 through Vercel AI Gateway. The adapter has no model fallback list and SDK retries are disabled. An unavailable or invalid model response is reported to the user without changing plan state.
 
-**Reason:** Model and transport changes should not require rewriting plan state management. A direct key helps local diagnosis, while the gateway remains suitable for OIDC-authenticated deployment.
+**Reason:** One explicit model keeps runtime behavior, cost, and failures observable. Plan contracts, validation, persistence, and scheduling remain independent from the transport.

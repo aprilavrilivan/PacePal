@@ -22,23 +22,10 @@ function normalizeEnvironmentValue(value: string | undefined) {
 
 const serverEnvironmentSchema = z.object({
   AI_GATEWAY_API_KEY: z.string().min(1).optional(),
-  AI_PROVIDER: z.enum(["mock", "gateway"]).default("mock"),
-  GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
-  GOOGLE_GENERATIVE_AI_MODEL: z
-    .string()
-    .min(1)
-    .default("gemini-3.1-flash-lite"),
 });
 
 const parsedEnvironment = serverEnvironmentSchema.safeParse({
   AI_GATEWAY_API_KEY: normalizeEnvironmentValue(process.env.AI_GATEWAY_API_KEY),
-  AI_PROVIDER: process.env.AI_PROVIDER,
-  GOOGLE_GENERATIVE_AI_API_KEY: normalizeEnvironmentValue(
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-  ),
-  GOOGLE_GENERATIVE_AI_MODEL: normalizeEnvironmentValue(
-    process.env.GOOGLE_GENERATIVE_AI_MODEL,
-  ),
 });
 
 if (!parsedEnvironment.success) {

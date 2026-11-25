@@ -9,7 +9,6 @@ import {
   validateDraftPhases,
   validateSubtasks,
 } from "@/features/pacepal/planning/engine";
-import { generateMockInitialDecision } from "@/features/pacepal/planning/mock-model";
 
 const input = {
   title: "Research paper",
@@ -19,10 +18,43 @@ const input = {
   priority: "high" as const,
 };
 
+function draftTask(
+  index: number,
+): InitialPlanDecision["phases"][number]["tasks"][number] {
+  return {
+    tempId: `task-${index}`,
+    title: `Task ${index}`,
+    description: `Complete task ${index}.`,
+    estimatedMinutes: 20 + index * 5,
+    completionCriteria: `Task ${index} is complete.`,
+    difficulty: index < 3 ? "low" : index < 7 ? "medium" : "high",
+    priority: index < 5 ? "high" : "medium",
+    dependencies: index === 1 ? [] : [`task-${index - 1}`],
+  };
+}
+
+const initialDecision: InitialPlanDecision = {
+  language: "en",
+  taskUnderstanding: "Complete the research paper in dependency order.",
+  assumptions: [],
+  phases: [
+    {
+      id: "prepare",
+      title: "Prepare",
+      tasks: [1, 2, 3, 4].map(draftTask),
+    },
+    {
+      id: "produce",
+      title: "Produce",
+      tasks: [5, 6, 7, 8].map(draftTask),
+    },
+  ],
+};
+
 function assignment(): Assignment {
   const plan = materializeInitialPlan(
     input,
-    generateMockInitialDecision(input),
+    initialDecision,
     new Date("2026-11-25T00:00:00.000Z"),
   );
   return {
@@ -45,9 +77,8 @@ function assignment(): Assignment {
 
 describe("initial plan materialization", () => {
   it("creates stable ids, phases, explicit priorities, and a valid dependency graph", () => {
-    const decision = generateMockInitialDecision(input);
-    const first = materializeInitialPlan(input, decision);
-    const second = materializeInitialPlan(input, decision);
+    const first = materializeInitialPlan(input, initialDecision);
+    const second = materializeInitialPlan(input, initialDecision);
 
     expect(first.subtasks.map((task) => task.id)).toEqual(
       second.subtasks.map((task) => task.id),

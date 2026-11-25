@@ -8,14 +8,14 @@ on:
       - .github/workflows/production-ai-smoke.yml
       - package-lock.json
       - package.json
+      - src/app/api/health/route.ts
       - src/app/api/plan/route.ts
       - src/app/api/refine/route.ts
-      - src/app/globals.css
       - src/components/pacepal-app.tsx
-      - src/features/pacepal/execution.ts
       - src/features/pacepal/model.ts
       - src/features/pacepal/planning/**
       - src/features/pacepal/scheduler.ts
+      - src/lib/env/server.ts
 
 permissions:
   contents: read
@@ -37,7 +37,8 @@ jobs:
             health="$(curl -fsS --max-time 15 https://pace-pal-eta.vercel.app/api/health || true)"
             if jq -e --arg sha "$GITHUB_SHA" '
               .status == "ok" and
-              .aiProvider == "gateway" and
+              .provider == "vercel-ai-gateway" and
+              .planningModel == "deepseek/deepseek-v4.1-flash-1017" and
               .commitSha == $sha
             ' <<<"$health" >/dev/null; then
               exit 0
@@ -46,74 +47,67 @@ jobs:
           done
           exit 1
 
-      - name: Verify live AI planning and refinement
+      - name: Verify one-model planning and refinement
         shell: bash
         run: |
-          for attempt in {1..5}; do
-            deadline="$(date -u -d '+21 days' '+%Y-%m-%dT18:00:00.000Z')"
-            response="$(curl -fsS --max-time 60 \
-              -H 'Content-Type: application/json' \
-              --data "{\"title\":\"人工智能课程研究计划\",\"requirements\":\"比较两种方法，完成资料整理、提纲、初稿和复核。\",\"deliverable\":\"1500 字研究报告\",\"deadline\":\"$deadline\",\"priority\":\"high\"}" \
-              https://pace-pal-eta.vercel.app/api/plan || true)"
-            jq '{fallback, fallbackReason, model, subtaskCount: (.subtasks | length)}' <<<"$response" || true
-            if ! jq -e '
-              .fallback == false and
-              (.model | type == "string" and startswith("google/")) and
-              (.subtasks | length >= 4)
-            ' <<<"$response" >/dev/null; then
-              sleep 10
-              continue
-            fi
+          deadline="$(date -u -d '+21 days' '+%Y-%m-%dT18:00:00.000Z')"
+          response="$(curl -fsS --max-time 60 \
+            -H 'Content-Type: application/json' \
+            --data "{\"title\":\"人工智能课程研究计划\",\"requirements\":\"比较两种方法，完成资料整理、提纲、初稿和复核。\",\"deliverable\":\"1500 字研究报告\",\"deadline\":\"$deadline\",\"priority\":\"high\"}" \
+            https://pace-pal-eta.vercel.app/api/plan)"
 
-            refine_request="$(jq -n \
-              --arg deadline "$deadline" \
-              --argjson tasks "$(jq '.subtasks | map(. + {status: "todo", actualMinutes: 0, activeSince: null, postponedUntil: null})' <<<"$response")" \
-              '{
-                assignment: {
-                  id: "production-smoke",
-                  createdAt: "2026-11-21T00:00:00.000Z",
-                  status: "scheduled",
-                  title: "人工智能课程研究计划",
-                  requirements: "比较两种方法，完成资料整理、提纲、初稿和复核。",
-                  deliverable: "1500 字研究报告",
-                  deadline: $deadline,
-                  priority: "high",
-                  subtasks: $tasks,
-                  availability: {dailyMinutes: 60, preferredTime: "18:00"},
-                  schedule: [],
-                  unscheduledMinutes: 0,
-                  checkIn: {availableMinutes: 30, energy: "medium"},
-                  scheduleNotice: "",
-                  chatMessages: []
-                },
-                message: "把当前推荐的子任务拆成两个能独立完成的小步骤，并说明你理解了什么和具体改了什么。"
-              }')"
-            refinement="$(curl -fsS --max-time 60 \
-              -H 'Content-Type: application/json' \
-              --data "$refine_request" \
-              https://pace-pal-eta.vercel.app/api/refine || true)"
-            jq '{fallback, fallbackReason, model, assistantMessage, appliedOperations, planVersion: .plan.planVersion}' <<<"$refinement" || true
-            if jq -e '
-              .fallback == false and
-              (.model | type == "string" and startswith("google/")) and
-              (.appliedOperations | any(.type == "split_task")) and
-              (.appliedOperations | any(.type == "reschedule")) and
-              (.plan.subtasks | length >= 5) and
-              (.assistantMessage | length > 20)
-            ' <<<"$refinement" >/dev/null; then
-              exit 0
-            fi
-            sleep 10
-          done
-          exit 1
+          jq '{model, usage, subtaskCount: (.subtasks | length)}' <<<"$response"
+          jq -e '
+            .model == "deepseek/deepseek-v4.1-flash-1017" and
+            .usage.inputTokens > 0 and
+            .usage.outputTokens > 0 and
+            (.subtasks | length >= 4)
+          ' <<<"$response" >/dev/null
+
+          refine_request="$(jq -n \
+            --arg deadline "$deadline" \
+            --argjson tasks "$(jq '.subtasks | map(. + {status: "todo", actualMinutes: 0, activeSince: null, postponedUntil: null})' <<<"$response")" \
+            '{
+              assignment: {
+                id: "production-smoke",
+                createdAt: "2026-11-26T00:00:00.000Z",
+                status: "scheduled",
+                title: "人工智能课程研究计划",
+                requirements: "比较两种方法，完成资料整理、提纲、初稿和复核。",
+                deliverable: "1500 字研究报告",
+                deadline: $deadline,
+                priority: "high",
+                subtasks: $tasks,
+                availability: {dailyMinutes: 60, preferredTime: "18:00"},
+                schedule: [],
+                unscheduledMinutes: 0,
+                checkIn: {availableMinutes: 30, energy: "medium"},
+                scheduleNotice: "",
+                chatMessages: []
+              },
+              message: "把当前推荐的子任务拆成两个能独立完成的小步骤，并说明你理解了什么和具体改了什么。"
+            }')"
+          refinement="$(curl -fsS --max-time 60 \
+            -H 'Content-Type: application/json' \
+            --data "$refine_request" \
+            https://pace-pal-eta.vercel.app/api/refine)"
+
+          jq '{model, usage, assistantMessage, appliedOperations, planVersion: .plan.planVersion}' <<<"$refinement"
+          jq -e '
+            .model == "deepseek/deepseek-v4.1-flash-1017" and
+            .usage.inputTokens > 0 and
+            (.appliedOperations | any(.type == "split_task")) and
+            (.appliedOperations | any(.type == "reschedule")) and
+            (.plan.subtasks | length >= 5) and
+            (.assistantMessage | length > 20)
+          ' <<<"$refinement" >/dev/null
+
+          jq -r '"### Initial planning usage\n\n- model: `\(.model)`\n- input tokens: `\(.usage.inputTokens)`\n- output tokens: `\(.usage.outputTokens)`\n- reasoning tokens: `\(.usage.reasoningTokens)`\n- total tokens: `\(.usage.totalTokens)`"' \
+            <<<"$response" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify progress-aware replanning
         shell: bash
         run: |
-          # Keep the production probe representative but intentionally small:
-          # free providers enforce short-window quotas, while the broader intent
-          # matrix is covered by deterministic unit tests.
-          sleep 30
           deadline="$(date -u -d '+21 days' '+%Y-%m-%dT18:00:00.000Z')"
           assignment="$(jq -n --arg deadline "$deadline" '
             def task($id; $title; $minutes; $dependencies; $status): {
@@ -131,7 +125,7 @@ jobs:
             };
             {
               id: "dynamic-replanning-smoke",
-              createdAt: "2026-11-22T00:00:00.000Z",
+              createdAt: "2026-11-26T00:00:00.000Z",
               status: "scheduled",
               title: "GEA 课程论文",
               requirements: "完成一篇中国近代史课程论文，需要可靠史料、清晰论点和规范格式。",
@@ -164,12 +158,8 @@ jobs:
               --data-binary @- \
               https://pace-pal-eta.vercel.app/api/refine)"
 
-          jq -r '"- fallback: `\(.fallback)`\n- model: `\(.model)`\n- assistant: \(.assistantMessage)\n- operations: `\(.appliedOperations | map(.type) | join(", "))`"' \
-            <<<"$remaining" >> "$GITHUB_STEP_SUMMARY"
-          jq -c '{fallback, model, assistantMessage, appliedOperations, planVersion: .plan.planVersion}' <<<"$remaining"
-
           jq -e '
-            .fallback == false and
+            .model == "deepseek/deepseek-v4.1-flash-1017" and
             ([.appliedOperations[] | select(.type == "set_status" and .status == "completed") | .taskId]
               | contains(["sources", "outline", "draft"])) and
             (.appliedOperations | all(

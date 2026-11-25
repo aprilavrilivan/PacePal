@@ -29,12 +29,6 @@ const failurePatterns = [
 export type PlanningFailureReason =
   (typeof failurePatterns)[number][0] | "provider-error";
 
-export type PlanningFailureAttempt = {
-  model: string;
-  provider: "google" | "gateway";
-  reason: PlanningFailureReason;
-};
-
 function errorText(error: unknown, depth = 0): string {
   if (depth > 3 || error == null) return "";
   if (typeof error === "string") return error;
@@ -62,49 +56,15 @@ export function classifyPlanningFailure(error: unknown): PlanningFailureReason {
   );
 }
 
-function preferredReason(attempts: PlanningFailureAttempt[]) {
-  const reasons = new Set(attempts.map((attempt) => attempt.reason));
-  for (const reason of [
-    "authentication",
-    "configuration",
-    "quota",
-    "unavailable",
-    "timeout",
-    "model-unavailable",
-    "invalid-output",
-    "provider-error",
-  ] as const) {
-    if (reasons.has(reason)) return reason;
-  }
-  return "provider-error";
-}
-
 export class PlanningProviderError extends Error {
-  readonly attempts: PlanningFailureAttempt[];
-  readonly reason: PlanningFailureReason;
-
-  constructor(attempts: PlanningFailureAttempt[]) {
-    const reason = preferredReason(attempts);
-    super(`The planning model failed (${reason}).`);
+  constructor(readonly reason: PlanningFailureReason) {
+    super("The planning model is unavailable.");
     this.name = "PlanningProviderError";
-    this.attempts = attempts;
-    this.reason = reason;
   }
-}
-
-export function providerFailureReason(error: unknown) {
-  return error instanceof PlanningProviderError
-    ? error.reason
-    : classifyPlanningFailure(error);
-}
-
-export function providerFailureAttempts(error: unknown) {
-  return error instanceof PlanningProviderError ? error.attempts : [];
 }
 
 export function safeProviderError(error: unknown) {
   return errorText(error)
-    .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted-google-api-key]")
     .replace(
       /((?:api[_ -]?key|authorization|bearer|token|key)["'=:\s]+)[^\s,;}\"]+/gi,
       "$1[redacted]",

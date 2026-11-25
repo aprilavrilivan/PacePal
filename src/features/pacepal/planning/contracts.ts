@@ -148,17 +148,17 @@ export const planSnapshotSchema = z.object({
   planHistory: z.array(planChangeSchema).max(30),
 });
 
+export const modelUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  reasoningTokens: z.number().int().nonnegative(),
+  cacheReadTokens: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+});
+
 export const planApiResponseSchema = z.object({
-  fallback: z.boolean(),
-  fallbackReason: z.string().nullable(),
-  model: z.string().nullable(),
-  providerAttempts: z.array(
-    z.object({
-      model: z.string(),
-      provider: z.enum(["google", "gateway"]),
-      reason: z.string(),
-    }),
-  ),
+  model: z.string().min(1),
+  usage: modelUsageSchema,
   language: planningLanguageSchema,
   assistantMessage: z.string().trim().min(1),
   assumptions: z.array(z.string()),
@@ -168,16 +168,8 @@ export const planApiResponseSchema = z.object({
 });
 
 export const refinementApiResponseSchema = z.object({
-  fallback: z.boolean(),
-  fallbackReason: z.string().nullable(),
-  model: z.string().nullable(),
-  providerAttempts: z.array(
-    z.object({
-      model: z.string(),
-      provider: z.enum(["google", "gateway"]),
-      reason: z.string(),
-    }),
-  ),
+  model: z.string().min(1),
+  usage: modelUsageSchema,
   assistantMessage: z.string().trim().min(1),
   changed: z.boolean(),
   confirmationRequired: z.boolean(),
@@ -191,5 +183,6 @@ export type InitialPlanDecision = z.infer<typeof initialPlanDecisionSchema>;
 export type PlanOperation = z.infer<typeof planOperationSchema>;
 export type RefinementDecision = z.infer<typeof refinementDecisionSchema>;
 export type PlanSnapshot = z.infer<typeof planSnapshotSchema>;
+export type ModelUsage = z.infer<typeof modelUsageSchema>;
 export type PlanApiResponse = z.infer<typeof planApiResponseSchema>;
 export type RefinementApiResponse = z.infer<typeof refinementApiResponseSchema>;

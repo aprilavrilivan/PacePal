@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   classifyPlanningFailure,
   PlanningProviderError,
-  providerFailureReason,
   safeProviderError,
 } from "@/features/pacepal/planning/provider-error";
 
@@ -18,12 +17,9 @@ describe("planning provider errors", () => {
     expect(classifyPlanningFailure(new Error(message))).toBe(expected);
   });
 
-  it("keeps the most actionable reason across retries", () => {
-    const error = new PlanningProviderError([
-      { model: "model", provider: "gateway", reason: "timeout" },
-      { model: "model", provider: "gateway", reason: "quota" },
-    ]);
-    expect(providerFailureReason(error)).toBe("quota");
+  it("preserves the single model failure reason", () => {
+    const error = new PlanningProviderError("quota");
+    expect(error.reason).toBe("quota");
   });
 
   it("redacts credentials from logs", () => {

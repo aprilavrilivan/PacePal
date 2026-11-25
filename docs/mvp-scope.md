@@ -71,7 +71,7 @@ Every MVP feature must follow these rules:
 - Refine the active task list and availability through a persistent conversation.
 - Validate structured model output before displaying or saving it.
 - Require explicit user confirmation before a generated plan becomes active.
-- Provide a deterministic mock mode when no AI credential is configured.
+- Report model unavailability without generating or saving a synthetic plan.
 
 ### 4.4 Availability and initial scheduling
 
@@ -171,6 +171,6 @@ The MVP is releasable only when:
 - AI failure does not corrupt or erase an existing plan;
 - API secrets are never exposed to the browser or committed to the repository;
 - scheduling and recommendation decisions can be reproduced and explained;
-- the application can run in mock/demo mode without an AI credential;
+- model unavailability is visible and never produces fabricated task data;
 - no required workflow depends on manually fabricated production data.
 - every screen satisfies the minimal-interface checks in the acceptance checklist.

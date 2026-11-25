@@ -1,8 +1,151 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+
+function fixtureTasks() {
+  const titles = [
+    "理解任务要求",
+    "确定完成思路",
+    "收集并筛选必要资料",
+    "整理要点与证据",
+    "完成详细大纲",
+    "完成成果初稿",
+    "修订内容与格式",
+    "提交前最终检查",
+  ];
+  return titles.map((title, index) => ({
+    id: `fixture-task-${index + 1}`,
+    title,
+    description: `完成“${title}”。`,
+    estimatedMinutes: 30 + index * 10,
+    completionCriteria: `“${title}”已完成。`,
+    difficulty: index < 2 ? "low" : index < 6 ? "medium" : "high",
+    dependencies: index === 0 ? [] : [`fixture-task-${index}`],
+    status: "todo",
+    actualMinutes: 0,
+    activeSince: null,
+    postponedUntil: null,
+    phase: index < 2 ? "理解与定向" : index < 5 ? "资料与结构" : "产出与提交",
+    taskPriority: index < 6 ? "high" : "medium",
+  }));
+}
+
+async function mockPlanningApi(page: Page) {
+  await page.route("**/api/plan", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        model: "deepseek/deepseek-v4.1-flash-1017",
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          reasoningTokens: 0,
+          cacheReadTokens: 0,
+          totalTokens: 0,
+        },
+        language: "zh",
+        assistantMessage: "我已理解任务要求，并按依赖关系生成计划。",
+        assumptions: [],
+        planVersion: 1,
+        planHistory: [
+          {
+            version: 1,
+            createdAt: "2026-11-26T00:00:00.000Z",
+            source: "initial",
+            summary: "生成初始计划",
+            operationTypes: ["create_plan"],
+          },
+        ],
+        subtasks: fixtureTasks(),
+      }),
+      status: 200,
+    });
+  });
+
+  await page.route("**/api/refine", async (route) => {
+    const request = route.request().postDataJSON() as {
+      assignment: {
+        title: string;
+        requirements: string;
+        deliverable: string;
+        deadline: string;
+        priority: "low" | "medium" | "high";
+        availability: { dailyMinutes: number; preferredTime: string };
+        subtasks: ReturnType<typeof fixtureTasks>;
+        language?: "zh" | "en";
+        planVersion?: number;
+        planHistory?: Array<{
+          version: number;
+          createdAt: string;
+          source: "initial" | "assistant";
+          summary: string;
+          operationTypes: string[];
+        }>;
+      };
+    };
+    const assignment = request.assignment;
+    const target = assignment.subtasks.find(
+      (task) => task.title === "理解任务要求",
+    );
+    const nextVersion = (assignment.planVersion ?? 1) + 1;
+    const operations = target
+      ? [
+          {
+            type: "set_status" as const,
+            taskId: target.id,
+            status: "completed" as const,
+          },
+          { type: "reschedule" as const },
+        ]
+      : [];
+
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        model: "deepseek/deepseek-v4.1-flash-1017",
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          reasoningTokens: 0,
+          cacheReadTokens: 0,
+          totalTokens: 0,
+        },
+        assistantMessage:
+          "我理解为“理解任务要求”已经完成。我已将“理解任务要求”标记为完成，并重新计算后续安排。",
+        changed: operations.length > 0,
+        confirmationRequired: false,
+        appliedOperations: operations,
+        plan: {
+          title: assignment.title,
+          requirements: assignment.requirements,
+          deliverable: assignment.deliverable,
+          deadline: assignment.deadline,
+          priority: assignment.priority,
+          availability: assignment.availability,
+          subtasks: assignment.subtasks.map((task) =>
+            task.id === target?.id ? { ...task, status: "completed" } : task,
+          ),
+          language: assignment.language ?? "zh",
+          planVersion: nextVersion,
+          planHistory: [
+            ...(assignment.planHistory ?? []),
+            {
+              version: nextVersion,
+              createdAt: "2026-11-26T00:01:00.000Z",
+              source: "assistant",
+              summary: "更新任务进度",
+              operationTypes: operations.map((operation) => operation.type),
+            },
+          ],
+        },
+      }),
+      status: 200,
+    });
+  });
+}
 
 test("creates, approves, schedules, and persists an assignment", async ({
   page,
 }) => {
+  await mockPlanningApi(page);
   await page.goto("/");
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
@@ -37,7 +180,9 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(
     page.getByRole("heading", { name: "确认任务计划" }),
   ).toBeVisible();
-  await expect(page.getByText("理解任务要求")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "理解任务要求" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "确认任务计划" }).click();
 
   await expect(page.getByRole("heading", { name: "今日重点" })).toBeVisible();
@@ -121,6 +266,7 @@ test("creates, approves, schedules, and persists an assignment", async ({
 test("keeps multiple assignments and lets the user switch between them", async ({
   page,
 }) => {
+  await mockPlanningApi(page);
   await page.goto("/");
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
@@ -156,17 +302,55 @@ test("keeps multiple assignments and lets the user switch between them", async (
   await expect(page.getByText("项目汇报").first()).toBeVisible();
 });
 
-test("reports a healthy mock foundation", async ({ request }) => {
+test("reports the configured production model", async ({ request }) => {
   const response = await request.get("/api/health");
 
   expect(response.ok()).toBe(true);
   await expect(response.json()).resolves.toEqual({
-    aiProvider: "mock",
     app: "PacePal",
     commitSha: null,
-    directGeminiConfigured: false,
+    planningModel: "deepseek/deepseek-v4.1-flash-1017",
+    provider: "vercel-ai-gateway",
     status: "ok",
   });
+});
+
+test("shows model unavailable without creating a fallback plan", async ({
+  page,
+}) => {
+  await page.route("**/api/plan", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        code: "model_unavailable",
+        error: "当前 AI 模型不可用，请稍后重试。",
+      }),
+      contentType: "application/json",
+      status: 503,
+    });
+  });
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
+
+  await page.getByRole("button", { name: "创建任务" }).click();
+  await page.getByLabel("任务名称").fill("课程论文");
+  await page.getByLabel("任务要求").fill("完成资料整理、初稿和复核。");
+  await page.getByLabel("成果形式").fill("课程报告");
+  const deadline = new Date();
+  deadline.setDate(deadline.getDate() + 7);
+  await page
+    .getByLabel("截止时间")
+    .fill(
+      `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`,
+    );
+  await page.getByRole("button", { name: "保存并生成任务" }).click();
+
+  await expect(
+    page.getByText("当前 AI 模型不可用，请稍后重试。"),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "确认任务计划" })).toHaveCount(
+    0,
+  );
 });
 
 test("shows the local storage account state when cloud is not configured", async ({

@@ -15,70 +15,24 @@ import {
   generateLiveInitialPlan,
   generateLiveRefinement,
 } from "@/features/pacepal/planning/live-model";
-import {
-  detectPlanningLanguage,
-  generateMockInitialDecision,
-  generateMockRefinementDecision,
-} from "@/features/pacepal/planning/mock-model";
-import {
-  providerFailureAttempts,
-  providerFailureReason,
-  type PlanningFailureAttempt,
-} from "@/features/pacepal/planning/provider-error";
-import { serverEnvironment } from "@/lib/env/server";
 
 export async function createTaskPlan(
   assignment: AssignmentInput,
 ): Promise<PlanApiResponse> {
-  let fallback = false;
-  let fallbackReason: string | null = null;
-  let model: string | null = null;
-  let providerAttempts: PlanningFailureAttempt[] = [];
-  let decision;
-
-  if (serverEnvironment.AI_PROVIDER === "mock") {
-    decision = generateMockInitialDecision(assignment);
-  } else {
-    try {
-      const result = await generateLiveInitialPlan(assignment);
-      decision = result.decision;
-      model = result.model;
-    } catch (error) {
-      console.error(
-        "Planning model failed; using the deterministic plan.",
-        error,
-      );
-      fallback = true;
-      fallbackReason = providerFailureReason(error);
-      providerAttempts = providerFailureAttempts(error);
-      decision = generateMockInitialDecision(assignment);
-    }
-  }
-
+  const result = await generateLiveInitialPlan(assignment);
   return {
-    fallback,
-    fallbackReason,
-    model,
-    providerAttempts,
-    ...materializeInitialPlan(assignment, decision),
+    model: result.model,
+    usage: result.usage,
+    ...materializeInitialPlan(assignment, result.decision),
   };
-}
-
-function safeFailureMessage(assignment: Assignment, message: string) {
-  const language = detectPlanningLanguage(message || assignment.title);
-  return language === "zh"
-    ? "我暂时无法完成这次分析。你的现有计划没有发生任何变化，请稍后再试。"
-    : "I could not complete that analysis. Your existing plan has not changed; please try again shortly.";
 }
 
 function unchangedResponse(
   assignment: Assignment,
   decision: RefinementDecision,
   options: {
-    fallback: boolean;
-    fallbackReason: string | null;
-    model: string | null;
-    providerAttempts: PlanningFailureAttempt[];
+    model: string;
+    usage: RefinementApiResponse["usage"];
   },
 ): RefinementApiResponse {
   return {
@@ -95,50 +49,18 @@ export async function refineTaskPlan(
   assignment: Assignment,
   message: string,
 ): Promise<RefinementApiResponse> {
-  let decision: RefinementDecision;
-  let model: string | null = null;
-
-  if (serverEnvironment.AI_PROVIDER === "mock") {
-    decision = generateMockRefinementDecision(assignment, message);
-  } else {
-    try {
-      const result = await generateLiveRefinement(assignment, message);
-      decision = result.decision;
-      model = result.model;
-    } catch (error) {
-      console.error(
-        "Planning refinement failed; preserving the saved plan.",
-        error,
-      );
-      const language = detectPlanningLanguage(message || assignment.title);
-      return unchangedResponse(
-        assignment,
-        {
-          language,
-          intent: "question",
-          assistantMessage: safeFailureMessage(assignment, message),
-          confirmation: "not_required",
-          operations: [],
-        },
-        {
-          fallback: true,
-          fallbackReason: providerFailureReason(error),
-          model: null,
-          providerAttempts: providerFailureAttempts(error),
-        },
-      );
-    }
-  }
+  const { decision, model, usage } = await generateLiveRefinement(
+    assignment,
+    message,
+  );
 
   if (
     decision.confirmation === "requested" ||
     decision.operations.length === 0
   ) {
     return unchangedResponse(assignment, decision, {
-      fallback: false,
-      fallbackReason: null,
       model,
-      providerAttempts: [],
+      usage,
     });
   }
 
@@ -148,10 +70,8 @@ export async function refineTaskPlan(
   });
 
   return {
-    fallback: false,
-    fallbackReason: null,
     model,
-    providerAttempts: [],
+    usage,
     assistantMessage: decision.assistantMessage,
     changed: result.changed,
     confirmationRequired: false,

@@ -15,7 +15,7 @@ npm run dev
 
 The application runs at `http://localhost:3000`. The health endpoint is available at `http://localhost:3000/api/health`.
 
-`AI_PROVIDER` defaults to `mock`; no external model credential is required for local development or automated tests. Set it to `gateway` to use live task decomposition and conversational refinement. If `GOOGLE_GENERATIVE_AI_API_KEY` is configured, PacePal uses the configured Gemini model directly. Otherwise it uses the same model through Vercel AI Gateway. Vercel deployments authenticate to AI Gateway with OIDC; local gateway testing can use a server-only `AI_GATEWAY_API_KEY`.
+PacePal calls only `deepseek/deepseek-v4.1-flash-1017` through Vercel AI Gateway. Vercel deployments authenticate with OIDC; local live-model testing requires a server-only `AI_GATEWAY_API_KEY`. Without a credential, the application reports that the model is unavailable. Automated browser tests intercept the AI endpoints with test-only fixtures.
 
 ## Data storage
 
@@ -49,14 +49,11 @@ npm run test:e2e
 | `NEXT_PUBLIC_APP_URL`                  | Browser-safe       | Canonical application URL when deployed   |
 | `NEXT_PUBLIC_SUPABASE_URL`             | Browser-safe       | Supabase project URL                      |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser-safe       | Supabase publishable key protected by RLS |
-| `AI_PROVIDER`                          | Server-only        | Selects `mock` or `gateway` behavior      |
 | `AI_GATEWAY_API_KEY`                   | Server-only secret | Optional key for local gateway testing    |
-| `GOOGLE_GENERATIVE_AI_API_KEY`         | Server-only secret | Optional direct Google AI credential      |
-| `GOOGLE_GENERATIVE_AI_MODEL`           | Server-only config | Gemini model used for planning            |
 
 Never prefix a secret with `NEXT_PUBLIC_`; Next.js includes such values in browser code.
 
-Live planning sends the assignment, current plan, and recent planning conversation to the configured Gemini endpoint. Do not submit confidential or highly sensitive content.
+Live planning sends the assignment, current plan, and recent planning conversation to DeepSeek V4.1 Flash 1017 through AI Gateway. Do not submit confidential or highly sensitive content.
 
 ## Vercel deployment
 
@@ -64,7 +61,7 @@ Production: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 
 1. Import the GitHub repository into Vercel.
 2. Keep the detected framework as Next.js.
-3. Add `AI_PROVIDER=gateway` for live planning, or keep `mock` for a model-free demo. Configure a direct Google key or use Vercel's OIDC-authenticated AI Gateway.
+3. Vercel uses its OIDC-authenticated AI Gateway connection; no model-selection environment variable is used.
 4. Set `NEXT_PUBLIC_APP_URL=https://pace-pal-eta.vercel.app` for Production.
 5. Add server secrets only through Vercel environment settings.
 6. Use Preview deployments for branches and Production for `main`.

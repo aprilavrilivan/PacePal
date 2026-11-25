@@ -72,7 +72,7 @@
 1. The AI request fails or times out.
 2. PacePal preserves all existing user input and plans.
 3. It explains that AI planning is temporarily unavailable.
-4. The user can retry, continue editing manually, or use the demo breakdown when mock mode is enabled.
+4. The user can retry or continue editing manually; PacePal does not substitute a synthetic breakdown.
 5. Scheduling continues to work for manually entered subtasks because it is not dependent on the LLM.
 
 ## 4. Infeasible-deadline flow

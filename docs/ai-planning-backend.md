@@ -19,10 +19,9 @@ The model can interpret language, propose a useful decomposition, classify conve
 
 - `planning/contracts.ts` defines the model and API contracts.
 - `planning/prompts.ts` contains versioned Chinese/English planning prompts.
-- `planning/live-model.ts` is the configurable Gemini/AI Gateway adapter with bounded retries and timeouts.
-- `planning/mock-model.ts` provides deterministic credential-free behavior for development and tests.
+- `planning/live-model.ts` calls DeepSeek V4.1 Flash 1017 once through AI Gateway with a hard timeout.
 - `planning/engine.ts` materializes initial plans and atomically applies plan operations.
-- `planning/service.ts` coordinates provider selection, validation, and safe fallback behavior.
+- `planning/service.ts` coordinates model output validation and plan materialization.
 - `planning/client.ts` validates API responses and merges only backend-validated plan snapshots.
 
 ## Initial planning
@@ -50,9 +49,11 @@ Deletion and merging require an explicit confirmation state. Contradictory progr
 
 ## Failure behavior
 
-Initial-plan provider failures return a validated deterministic proposal so the user can still start. Refinement failures are fail-closed: PacePal returns the existing validated plan and a brief retry message. It never applies a heuristic mutation after a live-model failure.
+There is no live-model fallback chain. Production makes one request to `deepseek/deepseek-v4.1-flash-1017` with SDK retries disabled. Any provider, quota, timeout, or invalid-output failure returns HTTP 503 with `model_unavailable`; the interface shows that message and does not create or modify a plan.
 
-The provider adapter classifies authentication, configuration, quota, timeout, unavailable-model, unavailable-service, and invalid-output failures. Logs redact credentials.
+There is no runtime mock provider. Automated tests use test-only HTTP fixtures, so a deployment cannot silently produce a synthetic plan because of an environment-variable mistake.
+
+The provider adapter classifies failures for private diagnostics and redacts credentials from logs. This classification never triggers another model request.
 
 ## Persistence boundary
 

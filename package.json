@@ -21,7 +21,6 @@
     "test:e2e:list": "playwright test --list"
   },
   "dependencies": {
-    "@ai-sdk/google": "^4.0.122",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.119.2",
     "ai": "^7.0.177",
