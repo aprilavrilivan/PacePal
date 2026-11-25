@@ -1,13 +1,7 @@
 import { ZodError } from "zod";
 
-import { generateGatewayPlan } from "@/features/pacepal/gateway-planner";
-import {
-  classifyGatewayFailure,
-  planningFailureAttempts,
-} from "@/features/pacepal/gateway-error";
 import { assignmentInputSchema } from "@/features/pacepal/model";
-import { generateMockPlan } from "@/features/pacepal/mock-planner";
-import { serverEnvironment } from "@/lib/env/server";
+import { createTaskPlan } from "@/features/pacepal/planning/service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -15,36 +9,12 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   try {
     const input = assignmentInputSchema.parse(await request.json());
-
-    if (serverEnvironment.AI_PROVIDER === "mock") {
-      return Response.json({
-        fallback: false,
-        model: null,
-        subtasks: generateMockPlan(input),
-      });
-    }
-
-    try {
-      const plan = await generateGatewayPlan(input);
-      return Response.json({
-        fallback: false,
-        model: plan.model,
-        subtasks: plan.subtasks,
-      });
-    } catch (error) {
-      console.error("AI Gateway plan generation failed", error);
-      return Response.json({
-        fallback: true,
-        fallbackReason: classifyGatewayFailure(error),
-        model: null,
-        providerAttempts: planningFailureAttempts(error),
-        subtasks: generateMockPlan(input),
-      });
-    }
+    return Response.json(await createTaskPlan(input));
   } catch (error) {
     if (error instanceof ZodError || error instanceof SyntaxError) {
       return Response.json({ error: "Invalid assignment." }, { status: 400 });
     }
-    throw error;
+    console.error("Unexpected plan API failure", error);
+    return Response.json({ error: "Planning failed." }, { status: 500 });
   }
 }

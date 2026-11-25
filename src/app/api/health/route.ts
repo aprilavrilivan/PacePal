@@ -1,5 +1,5 @@
 import { appConfig } from "@/lib/app-config";
-import { probeDirectGemini } from "@/features/pacepal/gateway-planner";
+import { probePlanningModel } from "@/features/pacepal/planning/live-model";
 import { serverEnvironment } from "@/lib/env/server";
 
 export const dynamic = "force-dynamic";
@@ -19,14 +19,15 @@ export async function GET(request: Request) {
     return Response.json(health);
   }
 
-  const geminiProbe = await probeDirectGemini();
-  const degraded = geminiProbe.configured && !geminiProbe.reachable;
+  const planningModelProbe = await probePlanningModel();
+  const degraded =
+    planningModelProbe.configured && !planningModelProbe.reachable;
 
   return Response.json(
     {
       ...health,
       status: degraded ? "degraded" : "ok",
-      geminiProbe,
+      planningModelProbe,
     },
     {
       status: degraded ? 503 : 200,

@@ -19,15 +19,12 @@ import {
 } from "@/features/pacepal/model";
 import { recommendAcrossAssignments } from "@/features/pacepal/execution";
 import {
-  generateMockPlan,
-  normalizeDependencies,
-} from "@/features/pacepal/mock-planner";
-import { requestPlan } from "@/features/pacepal/plan-api";
-import {
-  applyRefinement,
+  mergeValidatedPlan,
+  requestPlan,
   requestRefinement,
-} from "@/features/pacepal/refinement";
+} from "@/features/pacepal/planning/client";
 import { buildSchedule } from "@/features/pacepal/scheduler";
+import { chainTasksByOrder } from "@/features/pacepal/task-graph";
 import {
   clearAppState,
   clearAppStateOwner,
@@ -472,6 +469,7 @@ export function PacePalApp() {
     const nextErrors = validateAssignment(form);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
+    setPlanError("");
 
     if (formMode === "edit" && assignment) {
       const planningFieldsChanged =
@@ -490,7 +488,7 @@ export function PacePalApp() {
           updateAssignment((current) => {
             const edited = { ...current, ...form };
             const refined = response.changed
-              ? applyRefinement(edited, response)
+              ? mergeValidatedPlan(edited, response)
               : edited;
             return rebuildAssignmentSchedule(
               refined,
@@ -522,28 +520,35 @@ export function PacePalApp() {
     }
 
     setPlanBusy(true);
-    let subtasks: Subtask[];
+    let plan: Awaited<ReturnType<typeof requestPlan>>;
     try {
-      const plan = await requestPlan(form);
-      subtasks = plan.subtasks;
-    } catch {
-      subtasks = generateMockPlan(form);
-    } finally {
+      plan = await requestPlan(form);
+    } catch (error) {
+      setPlanError(
+        error instanceof Error ? error.message : "暂时无法生成计划，请稍后重试",
+      );
       setPlanBusy(false);
+      return;
     }
+    setPlanBusy(false);
 
     const nextAssignment: Assignment = {
       ...form,
       id: createId("assignment"),
       createdAt: new Date().toISOString(),
       status: "planning",
-      subtasks,
+      subtasks: plan.subtasks,
       availability: { dailyMinutes: 240, preferredTime: "09:00" },
       schedule: [],
       unscheduledMinutes: 0,
       checkIn: { availableMinutes: 30, energy: "medium" },
       scheduleNotice: "",
       chatMessages: [],
+      language: plan.language,
+      planVersion: plan.planVersion,
+      planHistory: plan.planHistory,
+      planningSummary: plan.assistantMessage,
+      planningAssumptions: plan.assumptions,
     };
 
     setAppState((current) => ({
@@ -578,14 +583,14 @@ export function PacePalApp() {
         reordered[target],
         reordered[index],
       ];
-      return { ...current, subtasks: normalizeDependencies(reordered) };
+      return { ...current, subtasks: chainTasksByOrder(reordered) };
     });
   }
 
   function deleteSubtask(id: string) {
     updateAssignment((current) => ({
       ...current,
-      subtasks: normalizeDependencies(
+      subtasks: chainTasksByOrder(
         current.subtasks.filter((subtask) => subtask.id !== id),
       ),
     }));
@@ -596,7 +601,7 @@ export function PacePalApp() {
     const id = createId("task");
     updateAssignment((current) => ({
       ...current,
-      subtasks: normalizeDependencies([
+      subtasks: chainTasksByOrder([
         ...current.subtasks,
         {
           actualMinutes: 0,
@@ -623,7 +628,7 @@ export function PacePalApp() {
   ): Assignment {
     const adjusted = {
       ...current,
-      subtasks: normalizeOrder ? normalizeDependencies(subtasks) : subtasks,
+      subtasks: normalizeOrder ? chainTasksByOrder(subtasks) : subtasks,
     };
     return current.status === "scheduled"
       ? rebuildAssignmentSchedule(adjusted, "")
@@ -992,7 +997,13 @@ export function PacePalApp() {
     }));
 
     try {
-      const response = await requestRefinement(assignment, message);
+      const response = await requestRefinement(
+        {
+          ...assignment,
+          chatMessages: [...assignment.chatMessages, userMessage],
+        },
+        message,
+      );
       const assistantMessage: ChatMessage = {
         content: response.assistantMessage,
         createdAt: new Date().toISOString(),
@@ -1002,9 +1013,9 @@ export function PacePalApp() {
 
       updateAssignment((current) => {
         const refined = response.changed
-          ? applyRefinement(current, response)
+          ? mergeValidatedPlan(current, response)
           : current;
-        const changedTaskPlan = response.operations.some(
+        const changedTaskPlan = response.appliedOperations.some(
           (operation) => operation.type !== "reschedule",
         );
         const next = response.changed
@@ -1340,11 +1351,37 @@ export function PacePalApp() {
             </button>
           </div>
 
+          {assignment.planningSummary ? (
+            <section
+              className={`${surfaceClassName} mt-8 px-5 py-5 sm:px-6`}
+              aria-label="AI 对任务的理解"
+            >
+              <h2 className="font-semibold text-slate-950">任务理解</h2>
+              <p className="mt-2 leading-7 text-slate-600">
+                {assignment.planningSummary}
+              </p>
+              {assignment.planningAssumptions?.length ? (
+                <ul className="mt-3 space-y-1 text-sm text-slate-500">
+                  {assignment.planningAssumptions.map((assumption) => (
+                    <li key={assumption}>假设：{assumption}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          ) : null}
+
           <ol
-            className={`${surfaceClassName} mt-8 divide-y divide-slate-100 overflow-hidden px-5 sm:px-6`}
+            className={`${surfaceClassName} mt-6 divide-y divide-slate-100 overflow-hidden px-5 sm:px-6`}
           >
             {assignment.subtasks.map((subtask, index) => (
               <li className="py-5" key={subtask.id}>
+                {subtask.phase &&
+                (index === 0 ||
+                  assignment.subtasks[index - 1]?.phase !== subtask.phase) ? (
+                  <p className="mb-3 text-xs font-semibold tracking-[0.08em] text-violet-600 uppercase">
+                    {subtask.phase}
+                  </p>
+                ) : null}
                 {editingTaskId === subtask.id ? (
                   <SubtaskEditor
                     subtask={subtask}

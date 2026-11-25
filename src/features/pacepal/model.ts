@@ -31,6 +31,16 @@ export const subtaskSchema = z.object({
   actualMinutes: z.number().int().min(0).default(0),
   activeSince: z.string().nullable().default(null),
   postponedUntil: z.string().nullable().default(null),
+  phase: z.string().trim().min(1).optional(),
+  taskPriority: prioritySchema.optional(),
+});
+
+export const planChangeSchema = z.object({
+  version: z.number().int().positive(),
+  createdAt: z.string().min(1),
+  source: z.enum(["initial", "assistant"]),
+  summary: z.string().trim().min(1),
+  operationTypes: z.array(z.string().trim().min(1)).max(64),
 });
 
 export const availabilitySchema = z.object({
@@ -70,6 +80,11 @@ export const assignmentSchema = assignmentInputSchema.extend({
   checkIn: checkInSchema.default({ availableMinutes: 30, energy: "medium" }),
   scheduleNotice: z.string().default(""),
   chatMessages: z.array(chatMessageSchema).default([]),
+  language: z.enum(["zh", "en"]).optional(),
+  planVersion: z.number().int().positive().optional(),
+  planHistory: z.array(planChangeSchema).max(30).optional(),
+  planningSummary: z.string().trim().min(1).optional(),
+  planningAssumptions: z.array(z.string().trim().min(1)).max(6).optional(),
 });
 
 const legacyAppStateSchema = z.object({
@@ -101,6 +116,7 @@ export type ScheduleBlock = z.infer<typeof scheduleBlockSchema>;
 export type CheckIn = z.infer<typeof checkInSchema>;
 export type Energy = z.infer<typeof energySchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
+export type PlanChange = z.infer<typeof planChangeSchema>;
 export type Assignment = z.infer<typeof assignmentSchema>;
 export type AppState = z.infer<typeof appStateSchema>;
 

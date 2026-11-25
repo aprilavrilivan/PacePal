@@ -82,6 +82,8 @@ These decisions convert the product brief into an implementation boundary. Chang
 
 ## PD-013 — Nemotron 3.5 Lightning Free for live task planning
 
+**Status:** Superseded by PD-020.
+
 **Decision:** Stage 6 uses NVIDIA Nemotron 3.5 Lightning Free through Vercel AI Gateway. The model returns schema-constrained task data, which PacePal validates before showing it. Vercel production authenticates with its short-lived OIDC token, so PacePal stores no persistent model API key. Scheduling remains deterministic and separate from the model.
 
 **Reason:** It is a capable reasoning model with an explicitly free Vercel endpoint, a one-million-token context window, fast generation, and structured output support. This keeps the core planning flow usable without paid model usage.
@@ -114,6 +116,18 @@ These decisions convert the product brief into an implementation boundary. Chang
 
 ## PD-018 — Conversational refinement updates the real plan
 
-**Decision:** AI refinement returns a schema-validated complete task proposal and availability. PacePal preserves execution records for unchanged task IDs, validates dependencies, rebuilds the deterministic schedule, and persists the conversation with the assignment.
+**Decision:** AI refinement returns a strict set of typed plan operations. A deterministic backend engine applies the complete batch atomically, protects completed work, validates dependency references and cycles, then returns the validated plan snapshot. The browser never interprets or applies model operations itself.
 
 **Reason:** Chat is useful only when it can safely change the plan the student is actually executing. Keeping scheduling deterministic preserves predictable deadlines and locked commitments.
+
+## PD-019 — Versioned plan state and fail-closed refinement
+
+**Decision:** Initial plans use explicit phases, stable task IDs, completion criteria, estimates, priorities, and dependencies. Every successful AI plan mutation increments `planVersion` and appends a bounded change-history record. Ambiguous or destructive requests require clarification or confirmation. Provider, timeout, and validation failures preserve the existing plan unchanged.
+
+**Reason:** Model output is a proposal, not trusted state. Versioning makes changes auditable, while fail-closed behavior prevents a malformed response or heuristic fallback from corrupting completed work.
+
+## PD-020 — Configurable Gemini planning adapter
+
+**Decision:** Live planning uses the configured Gemini model either directly through Google AI or through Vercel AI Gateway. Provider-specific setup is isolated in one server-only adapter; plan contracts, validation, persistence, and scheduling do not depend on the transport.
+
+**Reason:** Model and transport changes should not require rewriting plan state management. A direct key helps local diagnosis, while the gateway remains suitable for OIDC-authenticated deployment.

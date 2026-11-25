@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   PlanningTimeoutError,
   withPlanningTimeout,
-} from "@/features/pacepal/planning-timeout";
+} from "@/features/pacepal/planning/timeout";
 
 describe("withPlanningTimeout", () => {
   it("rejects on its own deadline and aborts the provider request", async () => {

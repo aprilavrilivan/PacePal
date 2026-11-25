@@ -13,17 +13,8 @@ on:
       - src/app/globals.css
       - src/components/pacepal-app.tsx
       - src/features/pacepal/execution.ts
-      - src/features/pacepal/gateway-error.ts
-      - src/features/pacepal/gateway-planner.ts
-      - src/features/pacepal/gateway-refinement-normalizer.ts
-      - src/features/pacepal/gateway-refiner.ts
-      - src/features/pacepal/mock-refiner.ts
       - src/features/pacepal/model.ts
-      - src/features/pacepal/planning-timeout.ts
-      - src/features/pacepal/plan-api.ts
-      - src/features/pacepal/refinement.ts
-      - src/features/pacepal/refinement-quality.ts
-      - src/features/pacepal/refinement-summary.ts
+      - src/features/pacepal/planning/**
       - src/features/pacepal/scheduler.ts
 
 permissions:
@@ -67,14 +58,7 @@ jobs:
             jq '{fallback, fallbackReason, model, subtaskCount: (.subtasks | length)}' <<<"$response" || true
             if ! jq -e '
               .fallback == false and
-              (.model == "google/gemini-3.8-flash:direct" or
-                .model == "google/gemini-2.5-flash:direct" or
-                .model == "google/gemini-3.5-flash-lite:direct" or
-                .model == "google/gemini-2.5-flash-lite:direct" or
-                .model == "google/gemini-3.8-flash" or
-                .model == "reflection/beam-free" or
-                .model == "nvidia/nemotron-3.5-lightning-free" or
-                .model == "recursive/flint-v1.0") and
+              (.model | type == "string" and startswith("google/")) and
               (.subtasks | length >= 4)
             ' <<<"$response" >/dev/null; then
               sleep 10
@@ -108,23 +92,13 @@ jobs:
               -H 'Content-Type: application/json' \
               --data "$refine_request" \
               https://pace-pal-eta.vercel.app/api/refine || true)"
-            jq '{fallback, fallbackReason, model, assistantMessage, operations}' <<<"$refinement" || true
+            jq '{fallback, fallbackReason, model, assistantMessage, appliedOperations, planVersion: .plan.planVersion}' <<<"$refinement" || true
             if jq -e '
               .fallback == false and
-              (.model == "google/gemini-3.8-flash:direct" or
-                .model == "google/gemini-2.5-flash:direct" or
-                .model == "google/gemini-3.5-flash-lite:direct" or
-                .model == "google/gemini-2.5-flash-lite:direct" or
-                .model == "google/gemini-3.8-flash" or
-                .model == "reflection/beam-free" or
-                .model == "nvidia/nemotron-3.5-lightning-free" or
-                .model == "recursive/flint-v1.0") and
-              (.operations | any(
-                .type == "add_task" or
-                .type == "update_task" or
-                .type == "remove_task"
-              )) and
-              (.operations | any(.type == "reschedule")) and
+              (.model | type == "string" and startswith("google/")) and
+              (.appliedOperations | any(.type == "split_task")) and
+              (.appliedOperations | any(.type == "reschedule")) and
+              (.plan.subtasks | length >= 5) and
               (.assistantMessage | length > 20)
             ' <<<"$refinement" >/dev/null; then
               exit 0
@@ -190,21 +164,19 @@ jobs:
               --data-binary @- \
               https://pace-pal-eta.vercel.app/api/refine)"
 
-          jq -r '"- fallback: `\(.fallback)`\n- model: `\(.model)`\n- assistant: \(.assistantMessage)\n- operations: `\(.operations | map(.type) | join(", "))`"' \
+          jq -r '"- fallback: `\(.fallback)`\n- model: `\(.model)`\n- assistant: \(.assistantMessage)\n- operations: `\(.appliedOperations | map(.type) | join(", "))`"' \
             <<<"$remaining" >> "$GITHUB_STEP_SUMMARY"
-          jq -c '{fallback, model, assistantMessage, operations}' <<<"$remaining"
+          jq -c '{fallback, model, assistantMessage, appliedOperations, planVersion: .plan.planVersion}' <<<"$remaining"
 
           jq -e '
             .fallback == false and
-            ([.operations[] | select(.type == "set_status" and .status == "completed") | .taskId]
+            ([.appliedOperations[] | select(.type == "set_status" and .status == "completed") | .taskId]
               | contains(["sources", "outline", "draft"])) and
-            (.operations | any(
-              .type == "reorder_tasks" and
-              .taskIds[0:2] == ["polish", "submit"]
-            )) and
-            (.operations | all(
+            (.appliedOperations | all(
               (.type != "reopen_task") or .taskId != "topic"
             )) and
-            (.operations | any(.type == "reschedule")) and
+            (.appliedOperations | any(.type == "reschedule")) and
+            ([.plan.subtasks[] | select(.status == "completed") | .id]
+              | contains(["topic", "sources", "outline", "draft"])) and
             (.assistantMessage | length > 30)
           ' <<<"$remaining" >/dev/null

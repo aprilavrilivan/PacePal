@@ -1,0 +1,262 @@
+import "server-only";
+
+import { createGoogle } from "@ai-sdk/google";
+import { gateway, generateText, Output } from "ai";
+
+import type { Assignment, AssignmentInput } from "@/features/pacepal/model";
+import {
+  initialPlanDecisionSchema,
+  refinementDecisionSchema,
+  type InitialPlanDecision,
+  type RefinementDecision,
+} from "@/features/pacepal/planning/contracts";
+import {
+  applyPlanOperations,
+  PlanValidationError,
+  validateDraftPhases,
+} from "@/features/pacepal/planning/engine";
+import {
+  classifyPlanningFailure,
+  PlanningProviderError,
+  safeProviderError,
+  type PlanningFailureAttempt,
+} from "@/features/pacepal/planning/provider-error";
+import {
+  initialPlanSystemPrompt,
+  initialPlanUserPrompt,
+  refinementSystemPrompt,
+  refinementUserPrompt,
+} from "@/features/pacepal/planning/prompts";
+import { withPlanningTimeout } from "@/features/pacepal/planning/timeout";
+import { serverEnvironment } from "@/lib/env/server";
+
+export const planningRequestTimeoutMs = 55_000;
+export const planningAttemptTimeoutsMs = [36_000, 16_000] as const;
+
+type ModelProfile = {
+  id: string;
+  provider: "google" | "gateway";
+};
+
+export function planningModelProfile(): ModelProfile {
+  if (serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return {
+      id: serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL,
+      provider: "google",
+    };
+  }
+  return {
+    id: `google/${serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL}`,
+    provider: "gateway",
+  };
+}
+
+export function publicPlanningModelName(profile = planningModelProfile()) {
+  return profile.provider === "google"
+    ? `google/${profile.id}:generate-content`
+    : profile.id;
+}
+
+function languageModel(profile: ModelProfile) {
+  if (profile.provider === "google") {
+    return createGoogle({
+      apiKey: serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
+    })(profile.id);
+  }
+  return gateway(profile.id);
+}
+
+function decisionValidationError(
+  decision: RefinementDecision,
+  assignment: Assignment,
+) {
+  if (decision.confirmation === "requested" && decision.operations.length > 0) {
+    return "A confirmation request must not contain operations.";
+  }
+  const destructive = decision.operations.some((operation) =>
+    ["delete_task", "merge_tasks"].includes(operation.type),
+  );
+  if (destructive && decision.confirmation !== "confirmed") {
+    return "Destructive operations require confirmation=confirmed.";
+  }
+
+  try {
+    applyPlanOperations(assignment, decision.operations, {
+      language: decision.language,
+      summary: decision.assistantMessage,
+      now: new Date(0),
+    });
+    return "";
+  } catch (error) {
+    if (error instanceof PlanValidationError) return error.issues.join(" | ");
+    throw error;
+  }
+}
+
+async function generateWithRetries<T>(options: {
+  run: (abortSignal: AbortSignal, feedback: string) => Promise<T>;
+  validate: (value: T) => string;
+}) {
+  const deadline = Date.now() + planningRequestTimeoutMs;
+  const failures: PlanningFailureAttempt[] = [];
+  const profile = planningModelProfile();
+  let feedback = "";
+
+  for (const [index, timeoutMs] of planningAttemptTimeoutsMs.entries()) {
+    const remaining = deadline - Date.now();
+    if (remaining < 3_000) break;
+    try {
+      const value = await withPlanningTimeout(
+        (abortSignal) => options.run(abortSignal, feedback),
+        Math.min(timeoutMs, remaining - 1_000),
+      );
+      const issue = options.validate(value);
+      if (!issue) return value;
+      feedback = issue.slice(0, 1200);
+      throw new PlanValidationError([issue]);
+    } catch (error) {
+      const reason = classifyPlanningFailure(error);
+      failures.push({
+        model: publicPlanningModelName(profile),
+        provider: profile.provider,
+        reason,
+      });
+      const canRetry =
+        index + 1 < planningAttemptTimeoutsMs.length &&
+        ![
+          "authentication",
+          "configuration",
+          "model-unavailable",
+          "quota",
+        ].includes(reason);
+      console.warn(
+        `Planning model attempt failed (${reason}); ${canRetry ? "retrying" : "stopping"}. ${safeProviderError(error)}`,
+      );
+      if (!canRetry) break;
+    }
+  }
+
+  throw new PlanningProviderError(failures);
+}
+
+export async function generateLiveInitialPlan(
+  assignment: AssignmentInput,
+): Promise<{ decision: InitialPlanDecision; model: string }> {
+  const profile = planningModelProfile();
+  const decision = await generateWithRetries({
+    run: async (abortSignal, feedback) => {
+      const { output } = await generateText({
+        abortSignal,
+        maxOutputTokens: 6000,
+        maxRetries: 0,
+        model: languageModel(profile),
+        output: Output.object({
+          description: "A phased, dependency-aware task plan proposal.",
+          name: "pacepal_initial_plan",
+          schema: initialPlanDecisionSchema,
+        }),
+        reasoning: "high",
+        system: initialPlanSystemPrompt(),
+        prompt: [
+          initialPlanUserPrompt(assignment),
+          feedback ? `CORRECT_THE_PREVIOUS_OUTPUT: ${feedback}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      });
+      return output;
+    },
+    validate: (value) => {
+      try {
+        validateDraftPhases(value.phases);
+        return "";
+      } catch (error) {
+        return error instanceof PlanValidationError
+          ? error.issues.join(" | ")
+          : "The generated plan is invalid.";
+      }
+    },
+  });
+
+  return { decision, model: publicPlanningModelName(profile) };
+}
+
+export async function generateLiveRefinement(
+  assignment: Assignment,
+  message: string,
+): Promise<{ decision: RefinementDecision; model: string }> {
+  const profile = planningModelProfile();
+  const decision = await generateWithRetries({
+    run: async (abortSignal, feedback) => {
+      const { output } = await generateText({
+        abortSignal,
+        maxOutputTokens: 6000,
+        maxRetries: 0,
+        model: languageModel(profile),
+        output: Output.object({
+          description:
+            "A conversational response and the smallest validated plan-operation set needed for the user's request.",
+          name: "pacepal_plan_refinement",
+          schema: refinementDecisionSchema,
+        }),
+        reasoning: "high",
+        system: refinementSystemPrompt(),
+        prompt: refinementUserPrompt(assignment, message, feedback),
+      });
+      return output;
+    },
+    validate: (value) => decisionValidationError(value, assignment),
+  });
+
+  return { decision, model: publicPlanningModelName(profile) };
+}
+
+export type PlanningModelProbe = {
+  configured: boolean;
+  model: string | null;
+  reachable: boolean;
+  reason: string | null;
+};
+
+export async function probePlanningModel(): Promise<PlanningModelProbe> {
+  const profile = planningModelProfile();
+  if (
+    profile.provider === "gateway" &&
+    !serverEnvironment.AI_GATEWAY_API_KEY &&
+    !process.env.VERCEL_OIDC_TOKEN
+  ) {
+    return {
+      configured: false,
+      model: publicPlanningModelName(profile),
+      reachable: false,
+      reason: "No planning-model credential is configured.",
+    };
+  }
+  try {
+    const { text } = await withPlanningTimeout(
+      (abortSignal) =>
+        generateText({
+          abortSignal,
+          maxOutputTokens: 8,
+          maxRetries: 0,
+          model: languageModel(profile),
+          prompt: "Reply with only OK.",
+        }),
+      10_000,
+    );
+    const reachable = /^OK[.!]?$/i.test(text.trim());
+    return {
+      configured: true,
+      model: publicPlanningModelName(profile),
+      reachable,
+      reason: reachable ? null : "Unexpected probe response.",
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      model: publicPlanningModelName(profile),
+      reachable: false,
+      reason: classifyPlanningFailure(error),
+    };
+  }
+}

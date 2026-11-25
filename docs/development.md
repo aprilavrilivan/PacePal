@@ -15,7 +15,7 @@ npm run dev
 
 The application runs at `http://localhost:3000`. The health endpoint is available at `http://localhost:3000/api/health`.
 
-`AI_PROVIDER` defaults to `mock`; no external model credential is required for local development or automated tests. Set it to `gateway` to use live task decomposition. Vercel deployments authenticate to AI Gateway automatically with OIDC; local live testing can use a server-only `AI_GATEWAY_API_KEY`.
+`AI_PROVIDER` defaults to `mock`; no external model credential is required for local development or automated tests. Set it to `gateway` to use live task decomposition and conversational refinement. If `GOOGLE_GENERATIVE_AI_API_KEY` is configured, PacePal uses the configured Gemini model directly. Otherwise it uses the same model through Vercel AI Gateway. Vercel deployments authenticate to AI Gateway with OIDC; local gateway testing can use a server-only `AI_GATEWAY_API_KEY`.
 
 ## Data storage
 
@@ -51,10 +51,12 @@ npm run test:e2e
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser-safe       | Supabase publishable key protected by RLS |
 | `AI_PROVIDER`                          | Server-only        | Selects `mock` or `gateway` behavior      |
 | `AI_GATEWAY_API_KEY`                   | Server-only secret | Optional key for local gateway testing    |
+| `GOOGLE_GENERATIVE_AI_API_KEY`         | Server-only secret | Optional direct Google AI credential      |
+| `GOOGLE_GENERATIVE_AI_MODEL`           | Server-only config | Gemini model used for planning            |
 
 Never prefix a secret with `NEXT_PUBLIC_`; Next.js includes such values in browser code.
 
-Vercel's free AI Gateway credit is limited and renews every 30 days. PacePal sends assignment details to Vercel AI Gateway and Anthropic, so do not submit confidential or highly sensitive content.
+Live planning sends the assignment, current plan, and recent planning conversation to the configured Gemini endpoint. Do not submit confidential or highly sensitive content.
 
 ## Vercel deployment
 
@@ -62,7 +64,7 @@ Production: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 
 1. Import the GitHub repository into Vercel.
 2. Keep the detected framework as Next.js.
-3. Add `AI_PROVIDER=gateway` for live planning, or keep `mock` for a model-free demo. No production API key is required on Vercel.
+3. Add `AI_PROVIDER=gateway` for live planning, or keep `mock` for a model-free demo. Configure a direct Google key or use Vercel's OIDC-authenticated AI Gateway.
 4. Set `NEXT_PUBLIC_APP_URL=https://pace-pal-eta.vercel.app` for Production.
 5. Add server secrets only through Vercel environment settings.
 6. Use Preview deployments for branches and Production for `main`.

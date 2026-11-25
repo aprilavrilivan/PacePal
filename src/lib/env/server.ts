@@ -24,7 +24,10 @@ const serverEnvironmentSchema = z.object({
   AI_GATEWAY_API_KEY: z.string().min(1).optional(),
   AI_PROVIDER: z.enum(["mock", "gateway"]).default("mock"),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
-  GOOGLE_GENERATIVE_AI_MODEL: z.string().min(1).default("gemini-3.1-flash-lite"),
+  GOOGLE_GENERATIVE_AI_MODEL: z
+    .string()
+    .min(1)
+    .default("gemini-3.1-flash-lite"),
 });
 
 const parsedEnvironment = serverEnvironmentSchema.safeParse({

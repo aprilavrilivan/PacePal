@@ -35,7 +35,8 @@ Live site: [pace-pal-eta.vercel.app](https://pace-pal-eta.vercel.app)
 - Zod environment validation
 - Zod plan and persisted-state validation
 - Supabase Auth, Postgres, and row-level security
-- Nemotron 3.5 Lightning Free task planning through Vercel AI Gateway
+- Gemini task planning through Google AI or Vercel AI Gateway
+- Strict, versioned plan-operation protocol with deterministic validation
 - Deterministic scheduling engine
 - Vitest and Testing Library
 - Playwright
@@ -58,6 +59,7 @@ See [development and deployment](docs/development.md) for the complete setup.
 - [MVP user flows](docs/mvp-user-flows.md)
 - [MVP acceptance checklist](docs/mvp-acceptance-checklist.md)
 - [Product decision log](docs/product-decisions.md)
+- [AI planning backend](docs/ai-planning-backend.md)
 
 ## MVP release rule
 
