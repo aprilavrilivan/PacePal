@@ -33,25 +33,29 @@ import { serverEnvironment } from "@/lib/env/server";
 export const planningRequestTimeoutMs = 55_000;
 export const planningAttemptTimeoutsMs = [36_000, 16_000] as const;
 
-type ModelProfile = {
+export type ModelProfile = {
   id: string;
   provider: "google" | "gateway";
 };
 
-export function planningModelProfile(): ModelProfile {
-  if (serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY) {
-    return {
-      id: serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL,
-      provider: "google",
-    };
-  }
-  return {
+export function planningModelProfiles(): ModelProfile[] {
+  const gatewayProfile: ModelProfile = {
     id: `google/${serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL}`,
     provider: "gateway",
   };
+  if (serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return [
+      {
+        id: serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL,
+        provider: "google",
+      },
+      gatewayProfile,
+    ];
+  }
+  return [gatewayProfile];
 }
 
-export function publicPlanningModelName(profile = planningModelProfile()) {
+export function publicPlanningModelName(profile: ModelProfile) {
   return profile.provider === "google"
     ? `google/${profile.id}:generate-content`
     : profile.id;
@@ -94,24 +98,39 @@ function decisionValidationError(
 }
 
 async function generateWithRetries<T>(options: {
-  run: (abortSignal: AbortSignal, feedback: string) => Promise<T>;
+  run: (
+    profile: ModelProfile,
+    abortSignal: AbortSignal,
+    feedback: string,
+  ) => Promise<T>;
   validate: (value: T) => string;
-}) {
+}): Promise<{ profile: ModelProfile; value: T }> {
   const deadline = Date.now() + planningRequestTimeoutMs;
   const failures: PlanningFailureAttempt[] = [];
-  const profile = planningModelProfile();
+  const profiles = planningModelProfiles();
+  const attempts =
+    profiles.length > 1
+      ? profiles.map((profile, index) => ({
+          profile,
+          timeoutMs: index === 0 ? 28_000 : 25_000,
+        }))
+      : planningAttemptTimeoutsMs.map((timeoutMs) => ({
+          profile: profiles[0]!,
+          timeoutMs,
+        }));
   let feedback = "";
 
-  for (const [index, timeoutMs] of planningAttemptTimeoutsMs.entries()) {
+  for (const [index, attempt] of attempts.entries()) {
     const remaining = deadline - Date.now();
     if (remaining < 3_000) break;
+    const { profile, timeoutMs } = attempt;
     try {
       const value = await withPlanningTimeout(
-        (abortSignal) => options.run(abortSignal, feedback),
+        (abortSignal) => options.run(profile, abortSignal, feedback),
         Math.min(timeoutMs, remaining - 1_000),
       );
       const issue = options.validate(value);
-      if (!issue) return value;
+      if (!issue) return { profile, value };
       feedback = issue.slice(0, 1200);
       throw new PlanValidationError([issue]);
     } catch (error) {
@@ -122,13 +141,17 @@ async function generateWithRetries<T>(options: {
         reason,
       });
       const canRetry =
-        index + 1 < planningAttemptTimeoutsMs.length &&
-        ![
-          "authentication",
-          "configuration",
-          "model-unavailable",
-          "quota",
-        ].includes(reason);
+        index + 1 < attempts.length &&
+        // A direct credential, regional endpoint, or model permission can fail
+        // while Vercel's OIDC-authenticated gateway remains healthy. Only stop
+        // early when there is no different transport left to try.
+        (attempts[index + 1]?.profile.provider !== profile.provider ||
+          ![
+            "authentication",
+            "configuration",
+            "model-unavailable",
+            "quota",
+          ].includes(reason));
       console.warn(
         `Planning model attempt failed (${reason}); ${canRetry ? "retrying" : "stopping"}. ${safeProviderError(error)}`,
       );
@@ -142,9 +165,8 @@ async function generateWithRetries<T>(options: {
 export async function generateLiveInitialPlan(
   assignment: AssignmentInput,
 ): Promise<{ decision: InitialPlanDecision; model: string }> {
-  const profile = planningModelProfile();
-  const decision = await generateWithRetries({
-    run: async (abortSignal, feedback) => {
+  const result = await generateWithRetries({
+    run: async (profile, abortSignal, feedback) => {
       const { output } = await generateText({
         abortSignal,
         maxOutputTokens: 6000,
@@ -178,16 +200,18 @@ export async function generateLiveInitialPlan(
     },
   });
 
-  return { decision, model: publicPlanningModelName(profile) };
+  return {
+    decision: result.value,
+    model: publicPlanningModelName(result.profile),
+  };
 }
 
 export async function generateLiveRefinement(
   assignment: Assignment,
   message: string,
 ): Promise<{ decision: RefinementDecision; model: string }> {
-  const profile = planningModelProfile();
-  const decision = await generateWithRetries({
-    run: async (abortSignal, feedback) => {
+  const result = await generateWithRetries({
+    run: async (profile, abortSignal, feedback) => {
       const { output } = await generateText({
         abortSignal,
         maxOutputTokens: 6000,
@@ -208,7 +232,10 @@ export async function generateLiveRefinement(
     validate: (value) => decisionValidationError(value, assignment),
   });
 
-  return { decision, model: publicPlanningModelName(profile) };
+  return {
+    decision: result.value,
+    model: publicPlanningModelName(result.profile),
+  };
 }
 
 export type PlanningModelProbe = {
@@ -219,44 +246,50 @@ export type PlanningModelProbe = {
 };
 
 export async function probePlanningModel(): Promise<PlanningModelProbe> {
-  const profile = planningModelProfile();
+  const profiles = planningModelProfiles();
   if (
-    profile.provider === "gateway" &&
+    profiles.every((profile) => profile.provider === "gateway") &&
     !serverEnvironment.AI_GATEWAY_API_KEY &&
     !process.env.VERCEL_OIDC_TOKEN
   ) {
     return {
       configured: false,
-      model: publicPlanningModelName(profile),
+      model: publicPlanningModelName(profiles[0]!),
       reachable: false,
       reason: "No planning-model credential is configured.",
     };
   }
-  try {
-    const { text } = await withPlanningTimeout(
-      (abortSignal) =>
-        generateText({
-          abortSignal,
-          maxOutputTokens: 8,
-          maxRetries: 0,
-          model: languageModel(profile),
-          prompt: "Reply with only OK.",
-        }),
-      10_000,
-    );
-    const reachable = /^OK[.!]?$/i.test(text.trim());
-    return {
-      configured: true,
-      model: publicPlanningModelName(profile),
-      reachable,
-      reason: reachable ? null : "Unexpected probe response.",
-    };
-  } catch (error) {
-    return {
-      configured: true,
-      model: publicPlanningModelName(profile),
-      reachable: false,
-      reason: classifyPlanningFailure(error),
-    };
+  let lastReason = "provider-error";
+  for (const profile of profiles) {
+    try {
+      const { text } = await withPlanningTimeout(
+        (abortSignal) =>
+          generateText({
+            abortSignal,
+            maxOutputTokens: 8,
+            maxRetries: 0,
+            model: languageModel(profile),
+            prompt: "Reply with only OK.",
+          }),
+        10_000,
+      );
+      if (/^OK[.!]?$/i.test(text.trim())) {
+        return {
+          configured: true,
+          model: publicPlanningModelName(profile),
+          reachable: true,
+          reason: null,
+        };
+      }
+      lastReason = "Unexpected probe response.";
+    } catch (error) {
+      lastReason = classifyPlanningFailure(error);
+    }
   }
+  return {
+    configured: true,
+    model: null,
+    reachable: false,
+    reason: lastReason,
+  };
 }
