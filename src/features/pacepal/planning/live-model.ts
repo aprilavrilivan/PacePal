@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createGoogle } from "@ai-sdk/google";
+import { createGoogle, type GoogleInteractionsModelId } from "@ai-sdk/google";
 import { gateway, generateText, Output } from "ai";
 
 import type { Assignment, AssignmentInput } from "@/features/pacepal/model";
@@ -36,36 +36,84 @@ export const planningAttemptTimeoutsMs = [36_000, 16_000] as const;
 export type ModelProfile = {
   id: string;
   provider: "google" | "gateway";
+  reasoning: "high" | "medium" | "low";
+  timeoutMs: number;
+  transport?: "generate-content" | "interactions";
 };
 
 export function planningModelProfiles(): ModelProfile[] {
-  const gatewayProfile: ModelProfile = {
-    id: `google/${serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL}`,
-    provider: "gateway",
-  };
+  const configuredModel = serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL;
+  const profiles: ModelProfile[] = [];
   if (serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY) {
-    return [
+    const directCandidates = [
       {
-        id: serverEnvironment.GOOGLE_GENERATIVE_AI_MODEL,
-        provider: "google",
+        id: configuredModel,
+        transport: configuredModel.startsWith("gemini-3.")
+          ? ("interactions" as const)
+          : ("generate-content" as const),
       },
-      gatewayProfile,
-    ];
+      { id: "gemini-2.5-flash", transport: "generate-content" as const },
+      {
+        id: "gemini-2.5-flash-lite",
+        transport: "generate-content" as const,
+      },
+    ].filter(
+      (candidate, index, candidates) =>
+        candidates.findIndex(
+          (value) =>
+            value.id === candidate.id &&
+            value.transport === candidate.transport,
+        ) === index,
+    );
+    profiles.push(
+      ...directCandidates.map((candidate, index): ModelProfile => ({
+        ...candidate,
+        provider: "google",
+        reasoning: index === 0 ? "high" : index === 1 ? "medium" : "low",
+        timeoutMs: index === 0 ? 18_000 : index === 1 ? 15_000 : 9_000,
+      })),
+    );
   }
-  return [gatewayProfile];
+  profiles.push(
+    {
+      id: `google/${configuredModel}`,
+      provider: "gateway",
+      reasoning: "medium",
+      timeoutMs: 9_000,
+    },
+    {
+      id: "nvidia/nemotron-3.5-lightning-free",
+      provider: "gateway",
+      reasoning: "low",
+      timeoutMs: 8_000,
+    },
+  );
+  return profiles.filter(
+    (profile, index, all) =>
+      all.findIndex(
+        (value) =>
+          value.id === profile.id &&
+          value.provider === profile.provider &&
+          value.transport === profile.transport,
+      ) === index,
+  );
 }
 
 export function publicPlanningModelName(profile: ModelProfile) {
-  return profile.provider === "google"
-    ? `google/${profile.id}:generate-content`
-    : profile.id;
+  if (profile.provider === "google") {
+    return `google/${profile.id}:${profile.transport}`;
+  }
+  return profile.id;
 }
 
 function languageModel(profile: ModelProfile) {
   if (profile.provider === "google") {
-    return createGoogle({
+    const google = createGoogle({
       apiKey: serverEnvironment.GOOGLE_GENERATIVE_AI_API_KEY,
-    })(profile.id);
+    });
+    return profile.transport === "interactions"
+      ? google.interactions(profile.id as GoogleInteractionsModelId)
+      : google(profile.id);
   }
   return gateway(profile.id);
 }
@@ -110,9 +158,9 @@ async function generateWithRetries<T>(options: {
   const profiles = planningModelProfiles();
   const attempts =
     profiles.length > 1
-      ? profiles.map((profile, index) => ({
+      ? profiles.map((profile) => ({
           profile,
-          timeoutMs: index === 0 ? 28_000 : 25_000,
+          timeoutMs: profile.timeoutMs,
         }))
       : planningAttemptTimeoutsMs.map((timeoutMs) => ({
           profile: profiles[0]!,
@@ -140,18 +188,7 @@ async function generateWithRetries<T>(options: {
         provider: profile.provider,
         reason,
       });
-      const canRetry =
-        index + 1 < attempts.length &&
-        // A direct credential, regional endpoint, or model permission can fail
-        // while Vercel's OIDC-authenticated gateway remains healthy. Only stop
-        // early when there is no different transport left to try.
-        (attempts[index + 1]?.profile.provider !== profile.provider ||
-          ![
-            "authentication",
-            "configuration",
-            "model-unavailable",
-            "quota",
-          ].includes(reason));
+      const canRetry = index + 1 < attempts.length;
       console.warn(
         `Planning model attempt failed (${reason}); ${canRetry ? "retrying" : "stopping"}. ${safeProviderError(error)}`,
       );
@@ -177,7 +214,7 @@ export async function generateLiveInitialPlan(
           name: "pacepal_initial_plan",
           schema: initialPlanDecisionSchema,
         }),
-        reasoning: "high",
+        reasoning: profile.reasoning,
         system: initialPlanSystemPrompt(),
         prompt: [
           initialPlanUserPrompt(assignment),
@@ -223,7 +260,7 @@ export async function generateLiveRefinement(
           name: "pacepal_plan_refinement",
           schema: refinementDecisionSchema,
         }),
-        reasoning: "high",
+        reasoning: profile.reasoning,
         system: refinementSystemPrompt(),
         prompt: refinementUserPrompt(assignment, message, feedback),
       });
