@@ -28,6 +28,7 @@ import {
 import { recommendAcrossAssignments } from "@/features/pacepal/execution";
 import {
   mergeValidatedPlan,
+  PlanningClientError,
   requestPlan,
   requestRefinement,
 } from "@/features/pacepal/planning/client";
@@ -1149,10 +1150,17 @@ export function PacePalApp() {
     setTodayPlanEditing(false);
   }
 
-  async function sendChatMessage(content: string) {
+  async function sendChatMessage(
+    content: string,
+    options: { removeMessageIds?: string[] } = {},
+  ) {
     const message = content.trim();
     if (!assignment || !message || chatBusy) return;
 
+    const removedIds = new Set(options.removeMessageIds ?? []);
+    const previousMessages = assignment.chatMessages.filter(
+      (entry) => !removedIds.has(entry.id),
+    );
     const userMessage: ChatMessage = {
       content: message,
       createdAt: new Date().toISOString(),
@@ -1163,14 +1171,17 @@ export function PacePalApp() {
     setChatBusy(true);
     updateAssignment((current) => ({
       ...current,
-      chatMessages: [...current.chatMessages, userMessage],
+      chatMessages: [
+        ...current.chatMessages.filter((entry) => !removedIds.has(entry.id)),
+        userMessage,
+      ],
     }));
 
     try {
       const response = await requestRefinement(
         {
           ...assignment,
-          chatMessages: [...assignment.chatMessages, userMessage],
+          chatMessages: previousMessages,
         },
         message,
       );
@@ -1200,6 +1211,9 @@ export function PacePalApp() {
         };
       });
     } catch (error) {
+      const retryable =
+        error instanceof PlanningClientError &&
+        error.code === "model_unavailable";
       const failureMessage =
         error instanceof Error
           ? error.message
@@ -1211,7 +1225,9 @@ export function PacePalApp() {
           {
             content: `${failureMessage} 你的计划没有变化。`,
             createdAt: new Date().toISOString(),
+            errorCode: retryable ? "model_unavailable" : undefined,
             id: createId("message"),
+            retryForMessageId: retryable ? userMessage.id : undefined,
             role: "assistant",
           },
         ],
@@ -1219,6 +1235,25 @@ export function PacePalApp() {
     } finally {
       setChatBusy(false);
     }
+  }
+
+  function retryChatMessage(failureMessage: ChatMessage) {
+    if (
+      !assignment ||
+      failureMessage.errorCode !== "model_unavailable" ||
+      !failureMessage.retryForMessageId ||
+      chatBusy
+    ) {
+      return;
+    }
+    const originalMessage = assignment.chatMessages.find(
+      (message) => message.id === failureMessage.retryForMessageId,
+    );
+    if (!originalMessage || originalMessage.role !== "user") return;
+
+    void sendChatMessage(originalMessage.content, {
+      removeMessageIds: [originalMessage.id, failureMessage.id],
+    });
   }
 
   function submitChat(event: FormEvent<HTMLFormElement>) {
@@ -2730,15 +2765,42 @@ export function PacePalApp() {
                         }`}
                         key={message.id}
                       >
-                        <p
-                          className={`max-w-[88%] rounded-2xl px-4 py-3 leading-7 whitespace-pre-wrap shadow-sm ${
+                        <div
+                          className={`max-w-[88%] rounded-2xl px-4 py-3 leading-7 shadow-sm ${
                             message.role === "user"
                               ? "rounded-tr-md bg-[#5b55df] text-white"
                               : "rounded-tl-md border border-slate-200 bg-white text-slate-700"
                           }`}
                         >
-                          {message.content}
-                        </p>
+                          <p className="whitespace-pre-wrap">
+                            {message.content}
+                          </p>
+                          {message.errorCode === "model_unavailable" &&
+                          message.retryForMessageId ? (
+                            <button
+                              className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-500/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={chatBusy}
+                              onClick={() => retryChatMessage(message)}
+                              type="button"
+                            >
+                              <svg
+                                aria-hidden="true"
+                                className="size-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5m-5 4a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"
+                                  stroke="currentColor"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                />
+                              </svg>
+                              重试
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                     {chatBusy ? (

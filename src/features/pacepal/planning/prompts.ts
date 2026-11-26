@@ -1,7 +1,7 @@
 import type { Assignment, AssignmentInput } from "@/features/pacepal/model";
 
 export const initialPlanningPromptVersion = "initial-plan-v3";
-export const refinementPromptVersion = "plan-refinement-v4";
+export const refinementPromptVersion = "plan-refinement-v5";
 
 const sharedRules = `
 You are PacePal, a bilingual planning partner. You help the user plan and execute work; you do not complete an academic submission for them.
@@ -107,10 +107,13 @@ export function refinementUserPrompt(
       dependencies: task.dependencies,
       status: task.status,
     })),
-    recentConversation: assignment.chatMessages.slice(-20).map((entry) => ({
-      role: entry.role,
-      content: entry.content.slice(0, 2000),
-    })),
+    recentConversation: assignment.chatMessages
+      .filter((entry) => entry.errorCode !== "model_unavailable")
+      .slice(-12)
+      .map((entry) => ({
+        role: entry.role,
+        content: entry.content.slice(0, 2000),
+      })),
     latestUserMessage: message,
   };
 

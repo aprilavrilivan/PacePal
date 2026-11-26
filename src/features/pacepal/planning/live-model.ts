@@ -29,7 +29,7 @@ import {
 import { withPlanningTimeout } from "@/features/pacepal/planning/timeout";
 
 export const planningModel = "deepseek/deepseek-v4.1-flash-1017";
-export const planningRequestTimeoutMs = 60_000;
+export const planningRequestTimeoutMs = 75_000;
 
 function modelUsage(usage: LanguageModelUsage): ModelUsage {
   return {

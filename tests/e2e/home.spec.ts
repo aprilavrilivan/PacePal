@@ -328,6 +328,56 @@ test("creates, approves, schedules, and persists an assignment", async ({
     page.getByText(/我已将.*“理解任务要求”.*标记为完成.*重新计算后续安排/),
   ).toBeVisible();
 
+  const retryPrompt = "请把下一步缩短为 20 分钟";
+  let retryRequestCount = 0;
+  await page.route("**/api/refine", async (route) => {
+    const request = route.request().postDataJSON() as {
+      assignment: { chatMessages: Array<{ content: string }> };
+      message: string;
+    };
+    if (request.message !== retryPrompt) {
+      await route.fallback();
+      return;
+    }
+
+    retryRequestCount += 1;
+    expect(
+      request.assignment.chatMessages.some(
+        (message) => message.content === retryPrompt,
+      ),
+    ).toBe(false);
+    if (retryRequestCount === 1) {
+      await route.fulfill({
+        body: JSON.stringify({
+          code: "model_unavailable",
+          error: "当前 AI 模型不可用，请稍后重试。",
+          reason: "unavailable",
+        }),
+        contentType: "application/json",
+        status: 503,
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.getByLabel("给 AI 助手的消息").fill(retryPrompt);
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(
+    page.getByText("当前 AI 模型不可用，请稍后重试。 你的计划没有变化。"),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
+  await expect(page.getByText(retryPrompt, { exact: true })).toHaveCount(1);
+
+  await page.getByRole("button", { name: "重试" }).click();
+  await expect.poll(() => retryRequestCount, { timeout: 3_000 }).toBe(2);
+  await expect(page.getByRole("button", { name: "重试" })).toHaveCount(0);
+  await expect(
+    page.getByText("当前 AI 模型不可用，请稍后重试。 你的计划没有变化。"),
+  ).toHaveCount(0);
+  await expect(page.getByText(retryPrompt, { exact: true })).toHaveCount(1);
+  await expect(page.getByText("正在分析进度与依赖…")).toHaveCount(0);
+
   await page.getByRole("button", { name: "日历" }).click();
   await expect(page.getByRole("heading", { name: "日历" })).toBeVisible();
   await expect(page.getByRole("button", { name: "上个月" })).toBeVisible();

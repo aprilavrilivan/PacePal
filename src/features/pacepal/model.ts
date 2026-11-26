@@ -67,6 +67,8 @@ export const chatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().trim().min(1),
   createdAt: z.string().min(1),
+  errorCode: z.enum(["model_unavailable"]).optional(),
+  retryForMessageId: z.string().min(1).optional(),
 });
 
 export const assignmentSchema = assignmentInputSchema.extend({

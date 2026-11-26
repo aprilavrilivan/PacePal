@@ -22,6 +22,7 @@ export async function POST(request: Request) {
         {
           code: "model_unavailable",
           error: "当前 AI 模型不可用，请稍后重试。",
+          reason: error.reason,
         },
         { status: 503 },
       );
