@@ -29,6 +29,12 @@ const failurePatterns = [
 export type PlanningFailureReason =
   (typeof failurePatterns)[number][0] | "provider-error";
 
+export function planningFailureMessage(reason: PlanningFailureReason) {
+  return reason === "invalid-output"
+    ? "本次 AI 生成结果未通过校验，请重试。"
+    : "当前 AI 模型不可用，请稍后重试。";
+}
+
 function errorText(error: unknown, depth = 0): string {
   if (depth > 3 || error == null) return "";
   if (typeof error === "string") return error;

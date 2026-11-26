@@ -1,7 +1,10 @@
 import { ZodError } from "zod";
 
 import { assignmentInputSchema } from "@/features/pacepal/model";
-import { PlanningProviderError } from "@/features/pacepal/planning/provider-error";
+import {
+  planningFailureMessage,
+  PlanningProviderError,
+} from "@/features/pacepal/planning/provider-error";
 import { createTaskPlan } from "@/features/pacepal/planning/service";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +22,7 @@ export async function POST(request: Request) {
       return Response.json(
         {
           code: "model_unavailable",
-          error: "当前 AI 模型不可用，请稍后重试。",
+          error: planningFailureMessage(error.reason),
           reason: error.reason,
         },
         { status: 503 },

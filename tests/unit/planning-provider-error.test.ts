@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyPlanningFailure,
+  planningFailureMessage,
   PlanningProviderError,
   safeProviderError,
 } from "@/features/pacepal/planning/provider-error";
@@ -20,6 +21,15 @@ describe("planning provider errors", () => {
   it("preserves the single model failure reason", () => {
     const error = new PlanningProviderError("quota");
     expect(error.reason).toBe("quota");
+  });
+
+  it("distinguishes invalid output from an unavailable model", () => {
+    expect(planningFailureMessage("invalid-output")).toBe(
+      "本次 AI 生成结果未通过校验，请重试。",
+    );
+    expect(planningFailureMessage("timeout")).toBe(
+      "当前 AI 模型不可用，请稍后重试。",
+    );
   });
 
   it("redacts credentials from logs", () => {

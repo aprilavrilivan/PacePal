@@ -26,6 +26,7 @@ import {
   refinementSystemPrompt,
   refinementUserPrompt,
 } from "@/features/pacepal/planning/prompts";
+import { assistantMessageValidationError } from "@/features/pacepal/planning/response-quality";
 import { withPlanningTimeout } from "@/features/pacepal/planning/timeout";
 
 export const planningModel = "deepseek/deepseek-v4.1-flash-1017";
@@ -104,6 +105,11 @@ function decisionValidationError(
   decision: RefinementDecision,
   assignment: Assignment,
 ) {
+  const messageIssue = assistantMessageValidationError(
+    decision.assistantMessage,
+  );
+  if (messageIssue) return messageIssue;
+
   if (decision.confirmation === "requested") {
     // The service discards every proposed operation until the user confirms.
     return "";
