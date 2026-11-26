@@ -666,9 +666,9 @@ export function PacePalApp() {
           activeSince: null,
           id,
           title: "新任务",
-          description: "写下完成这一步需要做什么。",
+          description: "新任务",
           estimatedMinutes: 30,
-          completionCriteria: "写下明确的完成标准",
+          completionCriteria: "新任务已完成",
           difficulty: "medium",
           dependencies: [],
           status: "todo",
@@ -713,9 +713,9 @@ export function PacePalApp() {
         {
           actualMinutes: 0,
           activeSince: null,
-          completionCriteria: "完成这一步的目标",
+          completionCriteria: "新子任务已完成",
           dependencies: [],
-          description: "写下完成这一步需要做什么",
+          description: "新子任务",
           difficulty: "medium",
           estimatedMinutes: 30,
           id,
@@ -763,11 +763,7 @@ export function PacePalApp() {
     }
 
     const invalidTask = assignment.subtasks.some(
-      (subtask) =>
-        !subtask.title.trim() ||
-        !subtask.description.trim() ||
-        !subtask.completionCriteria.trim() ||
-        subtask.estimatedMinutes < 5,
+      (subtask) => !subtask.title.trim() || subtask.estimatedMinutes < 5,
     );
 
     if (invalidTask) {
@@ -1466,10 +1462,6 @@ export function PacePalApp() {
           <h1 className="mt-6 text-3xl font-semibold tracking-[-0.03em] text-slate-950">
             {formMode === "create" ? "创建项目" : "编辑项目"}
           </h1>
-          <p className="mt-3 leading-7 text-slate-600">
-            先保存项目名称和截止时间。详细要求与任务拆解将在 AI
-            对话中逐步生成和更新。
-          </p>
 
           <form
             className={`${surfaceClassName} mt-8 space-y-6 p-5 sm:p-8`}
@@ -1599,9 +1591,6 @@ export function PacePalApp() {
                           <h2 className="font-semibold text-slate-950">
                             {subtask.title}
                           </h2>
-                          <p className="mt-1 text-slate-600">
-                            {subtask.completionCriteria}
-                          </p>
                         </div>
                         <span className="shrink-0 text-sm text-slate-500">
                           {subtask.estimatedMinutes} 分钟
@@ -1983,9 +1972,6 @@ export function PacePalApp() {
                           >
                             {recommendedAssignment.title}
                           </button>
-                          <p className="mt-6 max-w-2xl text-base leading-7 text-slate-600">
-                            {recommendedTask.completionCriteria}
-                          </p>
                           {recommendedBlock ? (
                             <p className="mt-6 text-sm font-semibold text-slate-500">
                               {formatScheduleDate(recommendedBlock.date)} ·{" "}
@@ -2505,12 +2491,6 @@ export function PacePalApp() {
                       <span className="pr-28 text-lg font-semibold text-slate-950">
                         {item.title}
                       </span>
-                      <span className="mt-2 line-clamp-2 text-sm font-medium text-slate-500">
-                        {item.deliverable ||
-                          (item.subtasks.length > 0
-                            ? item.planningSummary
-                            : "等待与 AI 对话后生成任务拆解")}
-                      </span>
                       <span className="mt-auto flex w-full items-center justify-between gap-3 pt-5 text-sm font-semibold text-slate-500">
                         <span>截止 {formatDate(item.deadline)}</span>
                         <span>
@@ -2648,10 +2628,6 @@ export function PacePalApp() {
                     <h2 className="mt-5 text-xl font-semibold text-slate-950">
                       手动添加详细任务
                     </h2>
-                    <p className="mt-2 max-w-md leading-7 text-slate-500">
-                      从第一个可执行步骤开始，之后可以继续添加、调整顺序，或再让
-                      AI 补充计划。
-                    </p>
                     <button
                       className={`${primaryButtonClassName} mt-6`}
                       onClick={addManualSubtask}
@@ -3180,10 +3156,6 @@ function ManualSubtaskRow({
   subtask: Subtask;
 }) {
   const [title, setTitle] = useState(subtask.title);
-  const [description, setDescription] = useState(subtask.description);
-  const [completionCriteria, setCompletionCriteria] = useState(
-    subtask.completionCriteria,
-  );
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     String(subtask.estimatedMinutes),
   );
@@ -3286,44 +3258,6 @@ function ManualSubtaskRow({
           删除
         </button>
       </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 sm:pl-12">
-        <label className="sr-only" htmlFor={`manual-description-${subtask.id}`}>
-          具体行动 {index + 1}
-        </label>
-        <input
-          className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 transition outline-none focus:border-violet-500 focus:bg-white focus:ring-4 focus:ring-violet-500/10"
-          id={`manual-description-${subtask.id}`}
-          onBlur={() =>
-            commitText(
-              description,
-              subtask.description,
-              (normalized) => ({ description: normalized }),
-              setDescription,
-            )
-          }
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="具体行动"
-          value={description}
-        />
-        <label className="sr-only" htmlFor={`manual-criteria-${subtask.id}`}>
-          完成标准 {index + 1}
-        </label>
-        <input
-          className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 transition outline-none focus:border-violet-500 focus:bg-white focus:ring-4 focus:ring-violet-500/10"
-          id={`manual-criteria-${subtask.id}`}
-          onBlur={() =>
-            commitText(
-              completionCriteria,
-              subtask.completionCriteria,
-              (normalized) => ({ completionCriteria: normalized }),
-              setCompletionCriteria,
-            )
-          }
-          onChange={(event) => setCompletionCriteria(event.target.value)}
-          placeholder="完成标准"
-          value={completionCriteria}
-        />
-      </div>
       <p className="mt-2 text-sm font-medium text-slate-400 sm:pl-12">
         {statusLabels[subtask.status]}
         {subtask.actualMinutes > 0
@@ -3353,39 +3287,19 @@ function SubtaskEditor({
           onChange={(event) => onChange({ title: event.target.value })}
         />
       </FormField>
-      <FormField label="具体行动">
-        <textarea
-          className={`${fieldClassName} min-h-24 resize-y`}
-          id={`description-${subtask.id}`}
-          value={subtask.description}
-          onChange={(event) => onChange({ description: event.target.value })}
+      <FormField label="预计分钟">
+        <input
+          className={fieldClassName}
+          id={`duration-${subtask.id}`}
+          min={5}
+          step={5}
+          type="number"
+          value={subtask.estimatedMinutes}
+          onChange={(event) =>
+            onChange({ estimatedMinutes: Number(event.target.value) })
+          }
         />
       </FormField>
-      <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
-        <FormField label="完成标准">
-          <input
-            className={fieldClassName}
-            id={`criteria-${subtask.id}`}
-            value={subtask.completionCriteria}
-            onChange={(event) =>
-              onChange({ completionCriteria: event.target.value })
-            }
-          />
-        </FormField>
-        <FormField label="预计分钟">
-          <input
-            className={fieldClassName}
-            id={`duration-${subtask.id}`}
-            min={5}
-            step={5}
-            type="number"
-            value={subtask.estimatedMinutes}
-            onChange={(event) =>
-              onChange({ estimatedMinutes: Number(event.target.value) })
-            }
-          />
-        </FormField>
-      </div>
       <div className="flex justify-end">
         <button
           className={secondaryButtonClassName}

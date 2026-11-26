@@ -163,6 +163,11 @@ test("creates a project shell, generates its first breakdown in chat, and persis
 
   await page.getByRole("button", { name: "创建项目" }).click();
   await expect(page.getByLabel("项目名称")).toBeVisible();
+  await expect(
+    page.getByText(
+      "先保存项目名称和截止时间。详细要求与任务拆解将在 AI 对话中逐步生成和更新。",
+    ),
+  ).toHaveCount(0);
   await expect(page.getByLabel("任务要求")).toHaveCount(0);
   await expect(page.getByLabel("成果形式")).toHaveCount(0);
   await expect(page.getByLabel("优先级")).toHaveCount(0);
@@ -217,6 +222,9 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   await page.getByRole("button", { exact: true, name: "概览" }).click();
 
   await expect(page.getByRole("heading", { name: "当前推荐" })).toBeVisible();
+  await expect(
+    page.getByText("“理解任务要求”已完成。", { exact: true }),
+  ).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "此刻可用时间 / 精力状态" }),
   ).toHaveCount(0);
@@ -481,8 +489,17 @@ test("lets the user manually create detailed tasks before chatting with AI", asy
   await expect(
     page.getByRole("heading", { name: "手动添加详细任务" }),
   ).toBeVisible();
+  await expect(
+    page.getByText(
+      "从第一个可执行步骤开始，之后可以继续添加、调整顺序，或再让 AI 补充计划。",
+    ),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "添加第一个详细任务" }).click();
   await expect(page.getByLabel("任务名称 1")).toHaveValue("新子任务");
+  await expect(page.getByLabel("具体行动 1")).toHaveCount(0);
+  await expect(page.getByLabel("完成标准 1")).toHaveCount(0);
+  await expect(page.getByText("写下完成这一步需要做什么")).toHaveCount(0);
+  await expect(page.getByText("完成这一步的目标")).toHaveCount(0);
   await page.getByLabel("任务名称 1").fill("明确项目范围");
   await page.getByRole("button", { name: "添加子任务" }).click();
   await expect(page.getByLabel("任务名称 1")).toHaveValue("明确项目范围");
@@ -539,6 +556,7 @@ test("shows model unavailable without creating a fallback plan", async ({
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
   await expect(page.getByText("还没有任务拆解")).toBeVisible();
+  await expect(page.getByText("等待与 AI 对话后生成任务拆解")).toHaveCount(0);
 });
 
 test("asks one clarification without creating a fabricated plan", async ({
