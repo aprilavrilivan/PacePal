@@ -190,6 +190,16 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(
     page.getByRole("heading", { name: "此刻可用时间 / 精力状态" }),
   ).toBeVisible();
+  await expect(page.getByRole("timer")).toHaveAttribute(
+    "aria-label",
+    "倒计时 0小时30分0秒",
+  );
+  await expect(
+    page.getByRole("button", { exact: true, name: "延期" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { exact: true, name: "卡住了" }),
+  ).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "待完成任务" })).toHaveCount(
     0,
   );
@@ -221,13 +231,18 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await page.getByRole("button", { name: "手动选择" }).click();
   await page.getByLabel("选择子任务").selectOption({ index: 2 });
   await page.getByRole("button", { exact: true, name: "开始" }).click();
-  await expect(page.getByText("已进行", { exact: true })).toBeVisible();
+  await expect(page.getByRole("timer")).toHaveAttribute(
+    "aria-label",
+    /倒计时 0小时29分5[89]秒/,
+    { timeout: 3_000 },
+  );
   await expect(page.getByText("进行中", { exact: true }).last()).toBeVisible();
   await page.getByRole("button", { exact: true, name: "暂停" }).click();
   await expect(page.getByText("已暂停", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("可用时间")).toBeEnabled();
   await page.getByRole("button", { exact: true, name: "继续" }).click();
-  await page.getByRole("button", { exact: true, name: "延期" }).click();
-  await expect(page.getByText("任务已延至明天，后续安排已重排")).toHaveCount(0);
+  await expect(page.getByLabel("可用时间")).toBeDisabled();
+  await page.getByRole("button", { exact: true, name: "暂停" }).click();
 
   await page.getByRole("button", { exact: true, name: "任务" }).click();
   await expect(

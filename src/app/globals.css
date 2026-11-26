@@ -64,6 +64,23 @@ select {
   color: #1e1b4b;
 }
 
+@keyframes flip-clock-page {
+  0% {
+    opacity: 0.45;
+    transform: perspective(320px) rotateX(-68deg);
+  }
+
+  100% {
+    opacity: 1;
+    transform: perspective(320px) rotateX(0deg);
+  }
+}
+
+.flip-clock-digit {
+  animation: flip-clock-page 320ms cubic-bezier(0.2, 0.75, 0.25, 1);
+  transform-origin: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

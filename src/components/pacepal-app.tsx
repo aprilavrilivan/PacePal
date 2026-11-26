@@ -4,6 +4,7 @@ import type { User } from "@supabase/supabase-js";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { CalendarMonthView } from "@/components/calendar-month-view";
+import { FlipCountdown } from "@/components/flip-countdown";
 import {
   loadCloudState,
   saveCloudState,
@@ -42,6 +43,10 @@ type TaskAdjustmentMode = "ai" | "manual" | null;
 type SyncStatus = "local" | "loading" | "saving" | "synced" | "error";
 type FormErrors = Partial<Record<keyof AssignmentInput, string>>;
 type TaskSelection = { assignmentId: string; subtaskId: string };
+type FocusTimerState = TaskSelection & {
+  remainingSeconds: number;
+  startedAt: string | null;
+};
 type TodayPlanDraftItem = TaskSelection & {
   blockId: string;
   durationMinutes: number;
@@ -103,33 +108,10 @@ function currentDateKey() {
   return `${year}-${month}-${day}`;
 }
 
-function dateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function tomorrowDateKey() {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  return dateKey(tomorrow);
-}
-
 function addMinutesToTime(value: string, minutes: number) {
   const [hours, initialMinutes] = value.split(":").map(Number);
   const total = hours * 60 + initialMinutes + minutes;
   return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-}
-
-function formatElapsedTime(totalSeconds: number) {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(safeSeconds / 3600);
-  const minutes = Math.floor((safeSeconds % 3600) / 60);
-  const seconds = safeSeconds % 60;
-  return [hours, minutes, seconds]
-    .map((value) => String(value).padStart(2, "0"))
-    .join(":");
 }
 
 function settleActiveTime(task: Subtask, now = new Date()): Subtask {
@@ -143,6 +125,15 @@ function settleActiveTime(task: Subtask, now = new Date()): Subtask {
     actualMinutes: task.actualMinutes + elapsed,
     activeSince: null,
   };
+}
+
+function remainingFocusSeconds(timer: FocusTimerState, now = Date.now()) {
+  if (!timer.startedAt) return timer.remainingSeconds;
+  return Math.max(
+    0,
+    timer.remainingSeconds -
+      Math.floor((now - new Date(timer.startedAt).getTime()) / 1_000),
+  );
 }
 
 function rebuildAssignmentSchedule(
@@ -214,6 +205,7 @@ export function PacePalApp() {
   const [recommendationPickerOpen, setRecommendationPickerOpen] =
     useState(false);
   const [clockTick, setClockTick] = useState(() => Date.now());
+  const [focusTimer, setFocusTimer] = useState<FocusTimerState | null>(null);
   const [todayPlanOpen, setTodayPlanOpen] = useState(false);
   const [todayPlanEditing, setTodayPlanEditing] = useState(false);
   const [todayPlanStartTime, setTodayPlanStartTime] = useState("09:00");
@@ -799,43 +791,59 @@ export function PacePalApp() {
     );
   }
 
-  function postponeTask(id: string, assignmentId = assignment?.id) {
+  function startFocusTask(
+    id: string,
+    assignmentId: string,
+    budgetMinutes: number,
+  ) {
     const now = new Date();
-    updateAssignment((current) => {
-      const subtasks = current.subtasks.map((subtask) =>
-        subtask.id === id
-          ? {
-              ...settleActiveTime(subtask, now),
-              postponedUntil: tomorrowDateKey(),
-              status: "postponed" as const,
-            }
-          : subtask,
-      );
-      return rebuildAssignmentSchedule(
-        { ...current, subtasks },
-        "任务已延至明天，后续安排已重排",
-        now,
-      );
-    }, assignmentId);
+    setFocusTimer((current) => {
+      const sameTask =
+        current?.assignmentId === assignmentId && current.subtaskId === id;
+      const remainingSeconds =
+        sameTask && current.remainingSeconds > 0
+          ? current.remainingSeconds
+          : budgetMinutes * 60;
+      return {
+        assignmentId,
+        remainingSeconds,
+        startedAt: now.toISOString(),
+        subtaskId: id,
+      };
+    });
+    startTask(id, assignmentId);
   }
 
-  function blockTask(id: string, assignmentId = assignment?.id) {
+  function pauseFocusTask(
+    id: string,
+    assignmentId: string,
+    fallbackRemainingSeconds: number,
+  ) {
     const now = new Date();
-    updateAssignment((current) => {
-      const subtasks = current.subtasks.map((subtask) =>
-        subtask.id === id
-          ? {
-              ...settleActiveTime(subtask, now),
-              status: "blocked" as const,
-            }
-          : subtask,
-      );
-      return rebuildAssignmentSchedule(
-        { ...current, subtasks },
-        "已标记卡住，相关任务暂未安排",
-        now,
-      );
-    }, assignmentId);
+    setFocusTimer((current) =>
+      current?.assignmentId === assignmentId && current.subtaskId === id
+        ? {
+            ...current,
+            remainingSeconds: remainingFocusSeconds(current, now.getTime()),
+            startedAt: null,
+          }
+        : {
+            assignmentId,
+            remainingSeconds: fallbackRemainingSeconds,
+            startedAt: null,
+            subtaskId: id,
+          },
+    );
+    pauseTask(id, assignmentId);
+  }
+
+  function completeFocusTask(id: string, assignmentId: string) {
+    setFocusTimer((current) =>
+      current?.assignmentId === assignmentId && current.subtaskId === id
+        ? null
+        : current,
+    );
+    toggleCompleted(id, assignmentId);
   }
 
   function splitBlockedTask(id: string, assignmentId = assignment?.id) {
@@ -881,6 +889,15 @@ export function PacePalApp() {
       })),
     }));
     setManualRecommendation(null);
+  }
+
+  function updateFocusBudget(availableMinutes: number) {
+    updateCheckIn({ availableMinutes });
+    setFocusTimer((current) =>
+      current && !current.startedAt
+        ? { ...current, remainingSeconds: availableMinutes * 60 }
+        : current,
+    );
   }
 
   function openTodayPlanEditor() {
@@ -1606,12 +1623,6 @@ export function PacePalApp() {
   const recommendationReasons = manualRecommendedTask
     ? ["手动选择", "按你的决定开始"]
     : (recommendation?.reasons ?? []);
-  const recommendedMinutes = recommendedTask
-    ? Math.min(
-        recommendedTask.estimatedMinutes,
-        assignment.checkIn.availableMinutes,
-      )
-    : 0;
   const recommendedBlock = recommendedTask
     ? (recommendedAssignment.schedule.find(
         (block) =>
@@ -1641,18 +1652,29 @@ export function PacePalApp() {
       )
       .map((task) => ({ assignment: item, task })),
   );
-  const recommendedElapsedSeconds = recommendedTask
-    ? recommendedTask.actualMinutes * 60 +
-      (recommendedTask.activeSince
-        ? Math.max(
-            0,
-            Math.floor(
-              (clockTick - new Date(recommendedTask.activeSince).getTime()) /
-                1_000,
-            ),
-          )
-        : 0)
-    : 0;
+  const recommendedTaskKey = recommendedTask
+    ? `${recommendedAssignment.id}::${recommendedTask.id}`
+    : null;
+  const focusTimerMatchesRecommendation =
+    Boolean(recommendedTaskKey) &&
+    `${focusTimer?.assignmentId}::${focusTimer?.subtaskId}` ===
+      recommendedTaskKey;
+  const activeFocusTimer = focusTimerMatchesRecommendation
+    ? focusTimer
+    : recommendedTask?.status === "in_progress" && recommendedTask.activeSince
+      ? {
+          assignmentId: recommendedAssignment.id,
+          remainingSeconds: assignment.checkIn.availableMinutes * 60,
+          startedAt: recommendedTask.activeSince,
+          subtaskId: recommendedTask.id,
+        }
+      : null;
+  const focusRemainingSeconds = activeFocusTimer
+    ? remainingFocusSeconds(activeFocusTimer, clockTick)
+    : assignment.checkIn.availableMinutes * 60;
+  const focusTimerRunning =
+    recommendedTask?.status === "in_progress" &&
+    Boolean(activeFocusTimer?.startedAt);
   const todayScheduledSeconds = todayBlocks.reduce(
     (total, { block }) => total + block.durationMinutes * 60,
     0,
@@ -1706,7 +1728,11 @@ export function PacePalApp() {
     >
       <div
         className={`mx-auto w-full px-5 py-7 sm:px-8 lg:px-10 lg:py-10 ${
-          dashboardView === "schedule" ? "max-w-[1500px]" : "max-w-[1180px]"
+          dashboardView === "schedule"
+            ? "max-w-[1500px]"
+            : dashboardView === "overview"
+              ? "max-w-[1360px]"
+              : "max-w-[1180px]"
         }`}
       >
         <div className="flex flex-col gap-5 pb-7 sm:flex-row sm:items-end sm:justify-between">
@@ -1748,191 +1774,191 @@ export function PacePalApp() {
 
         {dashboardView === "overview" ? (
           <section className="space-y-5">
-            <section
-              className={`${surfaceClassName} grid overflow-hidden lg:grid-cols-[1.35fr_0.65fr]`}
-            >
+            <section className={`${surfaceClassName} overflow-hidden`}>
               {recommendedTask ? (
-                <div className="overflow-hidden">
-                  <div className="border-b border-slate-100 px-6 py-5 sm:px-7">
+                <>
+                  <div className="border-b border-slate-100 px-6 py-5 sm:px-8">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-sm font-semibold tracking-wide text-slate-500">
                         接下来最值得推进
                       </p>
                       <div className="flex items-center gap-2 text-sm font-semibold text-violet-600">
                         <span>{statusLabels[recommendedTask.status]}</span>
-                        <span className="text-slate-300" aria-hidden="true">
+                        <span aria-hidden="true" className="text-slate-300">
                           ·
                         </span>
                         <span>
-                          {recommendedTask.estimatedMinutes >
-                          assignment.checkIn.availableMinutes
-                            ? `先做 ${recommendedMinutes} 分钟`
-                            : `${recommendedMinutes} 分钟`}
+                          本轮 {assignment.checkIn.availableMinutes} 分钟
                         </span>
                       </div>
                     </div>
                   </div>
-                  <div className="px-6 py-7 sm:px-7 sm:py-8">
-                    <h3 className="max-w-2xl text-2xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-3xl">
-                      {recommendedTask.title}
-                    </h3>
-                    <button
-                      className="mt-3 text-sm font-semibold text-violet-600"
-                      onClick={() =>
-                        selectAssignment(recommendedAssignment.id, "tasks")
-                      }
-                      type="button"
-                    >
-                      {recommendedAssignment.title}
-                    </button>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {recommendationReasons.map((reason) => (
-                        <span
-                          className="rounded-full bg-violet-50 px-3 py-1.5 text-sm font-semibold text-violet-700"
-                          key={reason}
+
+                  <div className="grid min-h-[34rem] gap-8 px-6 py-8 sm:px-8 sm:py-10 lg:grid-cols-[minmax(0,0.82fr)_minmax(32rem,1.18fr)] lg:items-center lg:gap-12 lg:px-10 lg:py-12">
+                    <div className="flex h-full flex-col justify-center">
+                      <div>
+                        <h3 className="max-w-2xl text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-4xl">
+                          {recommendedTask.title}
+                        </h3>
+                        <button
+                          className="mt-3 text-base font-semibold text-violet-600"
+                          onClick={() =>
+                            selectAssignment(recommendedAssignment.id, "tasks")
+                          }
+                          type="button"
                         >
-                          {reason}
-                        </span>
-                      ))}
-                    </div>
-                    <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
-                      {recommendedTask.completionCriteria}
-                    </p>
-                    {recommendedBlock ? (
-                      <p className="mt-5 text-sm font-semibold text-slate-500">
-                        {formatScheduleDate(recommendedBlock.date)} ·{" "}
-                        {recommendedBlock.startTime}
-                      </p>
-                    ) : null}
-                    {recommendedTask.status === "in_progress" ? (
-                      <div className="mt-6 inline-flex items-center gap-3 rounded-xl bg-slate-950 px-4 py-3 text-white">
-                        <span className="size-2 animate-pulse rounded-full bg-emerald-400" />
-                        <span className="font-mono text-lg font-semibold tracking-wide">
-                          {formatElapsedTime(recommendedElapsedSeconds)}
-                        </span>
-                        <span className="text-sm font-medium text-slate-300">
-                          已进行
-                        </span>
+                          {recommendedAssignment.title}
+                        </button>
+                        <div className="mt-5 flex flex-wrap gap-2">
+                          {recommendationReasons.map((reason) => (
+                            <span
+                              className="rounded-full bg-violet-50 px-3 py-1.5 text-sm font-semibold text-violet-700"
+                              key={reason}
+                            >
+                              {reason}
+                            </span>
+                          ))}
+                        </div>
+                        <p className="mt-6 max-w-2xl text-base leading-7 text-slate-600">
+                          {recommendedTask.completionCriteria}
+                        </p>
+                        {recommendedBlock ? (
+                          <p className="mt-6 text-sm font-semibold text-slate-500">
+                            {formatScheduleDate(recommendedBlock.date)} ·{" "}
+                            {recommendedBlock.startTime}
+                          </p>
+                        ) : null}
                       </div>
-                    ) : null}
-                    <div className="mt-8 flex flex-wrap gap-2">
-                      {recommendedTask.status === "in_progress" ? (
+
+                      <div className="mt-9 flex flex-wrap gap-2">
+                        {recommendedTask.status === "in_progress" ? (
+                          <button
+                            className={secondaryButtonClassName}
+                            onClick={() =>
+                              pauseFocusTask(
+                                recommendedTask.id,
+                                recommendedAssignment.id,
+                                focusRemainingSeconds,
+                              )
+                            }
+                            type="button"
+                          >
+                            暂停
+                          </button>
+                        ) : (
+                          <button
+                            className={primaryButtonClassName}
+                            onClick={() =>
+                              startFocusTask(
+                                recommendedTask.id,
+                                recommendedAssignment.id,
+                                assignment.checkIn.availableMinutes,
+                              )
+                            }
+                            type="button"
+                          >
+                            {recommendedTask.status === "paused"
+                              ? focusRemainingSeconds > 0
+                                ? "继续"
+                                : "再来一轮"
+                              : "开始"}
+                          </button>
+                        )}
                         <button
                           className={secondaryButtonClassName}
                           onClick={() =>
-                            pauseTask(
+                            completeFocusTask(
                               recommendedTask.id,
                               recommendedAssignment.id,
                             )
                           }
                           type="button"
                         >
-                          暂停
+                          完成
                         </button>
-                      ) : (
                         <button
-                          className={primaryButtonClassName}
+                          className={textButtonClassName}
                           onClick={() =>
-                            startTask(
-                              recommendedTask.id,
-                              recommendedAssignment.id,
-                            )
+                            setRecommendationPickerOpen((open) => !open)
                           }
                           type="button"
                         >
-                          {recommendedTask.status === "paused"
-                            ? "继续"
-                            : "开始"}
+                          手动选择
                         </button>
-                      )}
-                      <button
-                        className={secondaryButtonClassName}
-                        onClick={() =>
-                          toggleCompleted(
-                            recommendedTask.id,
-                            recommendedAssignment.id,
-                          )
-                        }
-                        type="button"
-                      >
-                        完成
-                      </button>
-                      <button
-                        className={textButtonClassName}
-                        onClick={() =>
-                          postponeTask(
-                            recommendedTask.id,
-                            recommendedAssignment.id,
-                          )
-                        }
-                        type="button"
-                      >
-                        延期
-                      </button>
-                      <button
-                        className={textButtonClassName}
-                        onClick={() =>
-                          blockTask(
-                            recommendedTask.id,
-                            recommendedAssignment.id,
-                          )
-                        }
-                        type="button"
-                      >
-                        卡住了
-                      </button>
-                      <button
-                        className={textButtonClassName}
-                        onClick={() =>
-                          setRecommendationPickerOpen((open) => !open)
-                        }
-                        type="button"
-                      >
-                        手动选择
-                      </button>
-                    </div>
-                    {recommendationPickerOpen ? (
-                      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <label
-                          className="text-sm font-semibold text-slate-600"
-                          htmlFor="manual-recommendation"
-                        >
-                          选择子任务
-                        </label>
-                        <select
-                          className={fieldClassName}
-                          id="manual-recommendation"
-                          onChange={(event) => {
-                            const [assignmentId, subtaskId] =
-                              event.target.value.split("::");
-                            if (!assignmentId || !subtaskId) return;
-                            setManualRecommendation({
-                              assignmentId,
-                              subtaskId,
-                            });
-                            setRecommendationPickerOpen(false);
-                          }}
-                          value=""
-                        >
-                          <option value="">选择一个待完成子任务</option>
-                          {pendingTaskOptions.map(
-                            ({ assignment: item, task }) => (
-                              <option
-                                key={`${item.id}-${task.id}`}
-                                value={`${item.id}::${task.id}`}
-                              >
-                                {item.title} · {task.title}
-                              </option>
-                            ),
-                          )}
-                        </select>
                       </div>
-                    ) : null}
+
+                      {recommendationPickerOpen ? (
+                        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                          <label
+                            className="text-sm font-semibold text-slate-600"
+                            htmlFor="manual-recommendation"
+                          >
+                            选择子任务
+                          </label>
+                          <select
+                            className={fieldClassName}
+                            id="manual-recommendation"
+                            onChange={(event) => {
+                              const [assignmentId, subtaskId] =
+                                event.target.value.split("::");
+                              if (!assignmentId || !subtaskId) return;
+                              setManualRecommendation({
+                                assignmentId,
+                                subtaskId,
+                              });
+                              setRecommendationPickerOpen(false);
+                            }}
+                            value=""
+                          >
+                            <option value="">选择一个待完成子任务</option>
+                            {pendingTaskOptions.map(
+                              ({ assignment: item, task }) => (
+                                <option
+                                  key={`${item.id}-${task.id}`}
+                                  value={`${item.id}::${task.id}`}
+                                >
+                                  {item.title} · {task.title}
+                                </option>
+                              ),
+                            )}
+                          </select>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="flex min-h-[25rem] flex-col items-center justify-center rounded-[1.75rem] bg-[#11131c] px-4 py-8 text-white shadow-[0_24px_55px_rgba(15,23,42,0.18)] sm:px-8 sm:py-10">
+                      <div className="mb-7 flex items-center gap-2 text-sm font-semibold tracking-[0.08em] text-slate-400">
+                        <span
+                          className={`size-2 rounded-full ${
+                            focusTimerRunning
+                              ? "animate-pulse bg-emerald-400"
+                              : "bg-slate-600"
+                          }`}
+                        />
+                        <span>
+                          {focusTimerRunning ? "本轮专注中" : "本轮专注倒计时"}
+                        </span>
+                      </div>
+                      <FlipCountdown
+                        isRunning={focusTimerRunning}
+                        remainingSeconds={focusRemainingSeconds}
+                      />
+                      <p
+                        aria-live="polite"
+                        className="mt-8 text-center text-sm font-medium text-slate-400"
+                      >
+                        {focusRemainingSeconds === 0
+                          ? "本轮时间到了，可以完成任务或再开始一轮。"
+                          : focusTimerRunning
+                            ? "保持节奏，专注完成眼前这一步。"
+                            : "在下方调整可用时间，再开始本轮专注。"}
+                      </p>
+                    </div>
                   </div>
-                </div>
+                </>
               ) : (
-                <div className="p-7">
-                  <h2 className="text-xl font-semibold text-slate-950">
+                <div className="min-h-[26rem] p-8 sm:p-10">
+                  <h2 className="text-2xl font-semibold text-slate-950">
                     {completedCount === assignment.subtasks.length
                       ? "当前计划已完成"
                       : "当前没有可开始的任务"}
@@ -1952,42 +1978,50 @@ export function PacePalApp() {
                 </div>
               )}
 
-              <div className="border-t border-slate-100 p-5 sm:p-6 lg:border-t-0 lg:border-l">
-                <h2 className="text-lg font-semibold text-slate-950">
-                  此刻可用时间 / 精力状态
-                </h2>
-                <div className="mt-5 space-y-4">
-                  <FormField label="可用时间">
-                    <select
-                      className={fieldClassName}
-                      id="check-in-time"
-                      onChange={(event) =>
-                        updateCheckIn({
-                          availableMinutes: Number(event.target.value),
-                        })
-                      }
-                      value={assignment.checkIn.availableMinutes}
-                    >
-                      <option value={15}>15 分钟</option>
-                      <option value={30}>30 分钟</option>
-                      <option value={60}>60 分钟</option>
-                      <option value={90}>90 分钟</option>
-                    </select>
-                  </FormField>
-                  <FormField label="精力">
-                    <select
-                      className={fieldClassName}
-                      id="check-in-energy"
-                      onChange={(event) =>
-                        updateCheckIn({ energy: event.target.value as Energy })
-                      }
-                      value={assignment.checkIn.energy}
-                    >
-                      <option value="low">较低</option>
-                      <option value="medium">正常</option>
-                      <option value="high">充足</option>
-                    </select>
-                  </FormField>
+              <div className="border-t border-slate-100 bg-slate-50/70 px-6 py-6 sm:px-8 lg:px-10">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                  <div className="max-w-md">
+                    <h2 className="text-lg font-semibold text-slate-950">
+                      此刻可用时间 / 精力状态
+                    </h2>
+                    <p className="mt-1.5 text-sm leading-6 text-slate-500">
+                      可用时间会直接设置翻页钟的本轮起始预算。
+                    </p>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:w-[35rem]">
+                    <FormField label="可用时间">
+                      <select
+                        className={fieldClassName}
+                        disabled={focusTimerRunning}
+                        id="check-in-time"
+                        onChange={(event) =>
+                          updateFocusBudget(Number(event.target.value))
+                        }
+                        value={assignment.checkIn.availableMinutes}
+                      >
+                        <option value={15}>15 分钟</option>
+                        <option value={30}>30 分钟</option>
+                        <option value={60}>60 分钟</option>
+                        <option value={90}>90 分钟</option>
+                      </select>
+                    </FormField>
+                    <FormField label="精力">
+                      <select
+                        className={fieldClassName}
+                        id="check-in-energy"
+                        onChange={(event) =>
+                          updateCheckIn({
+                            energy: event.target.value as Energy,
+                          })
+                        }
+                        value={assignment.checkIn.energy}
+                      >
+                        <option value="low">较低</option>
+                        <option value="medium">正常</option>
+                        <option value="high">充足</option>
+                      </select>
+                    </FormField>
+                  </div>
                 </div>
               </div>
             </section>
