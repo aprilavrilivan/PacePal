@@ -198,10 +198,11 @@ export async function probePlanningModel(): Promise<PlanningModelProbe> {
       (abortSignal) =>
         generateText({
           abortSignal,
-          maxOutputTokens: 8,
+          maxOutputTokens: 64,
           maxRetries: 0,
           model: gateway(planningModel),
           prompt: "Reply with only OK.",
+          reasoning: "low",
         }),
       10_000,
     );
