@@ -7,6 +7,12 @@ const proxy = process.env.HTTPS_PROXY ?? "http://127.0.0.1:7897";
 const outputPath =
   process.env.PACEPAL_EVAL_OUTPUT ??
   "/tmp/pacepal-ai-planning-evaluation-2026-11-26.json";
+const selectedTestIds = new Set(
+  (process.env.PACEPAL_EVAL_TESTS ?? "")
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter(Number.isInteger),
+);
 const createdAt = "2026-11-26T00:00:00.000Z";
 const deadline = "2026-12-10T10:00:00.000Z";
 
@@ -19,6 +25,10 @@ const report = {
 
 function persist() {
   writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+function shouldRun(id) {
+  return selectedTestIds.size === 0 || selectedTestIds.has(id);
 }
 
 function request(path, payload) {
@@ -257,6 +267,7 @@ function record(entry) {
 }
 
 function planTest(id, name, input, expected) {
+  if (!shouldRun(id)) return null;
   console.log(`[${id}/15] running ${name}`);
   const response = request("/api/plan", input);
   record({
@@ -293,6 +304,7 @@ function refineTurn(source, message) {
 }
 
 function refineTest(id, name, source, messages, expected) {
+  if (!shouldRun(id)) return source;
   console.log(`[${id}/15] running ${name}`);
   const turns = [];
   let current = source;
@@ -471,7 +483,6 @@ refineTest(
   "理解中英混合语义；用中文响应；保留已完成大纲；调整未完成任务以聚焦农业发展与住房结构。",
 );
 
-console.log("[13/15] running Switching Conversation Language");
 const presentationInput = {
   title: "Reinforcement Learning Presentation",
   requirements:
@@ -480,47 +491,50 @@ const presentationInput = {
   deadline: "2026-12-03T10:00:00.000Z",
   priority: "high",
 };
-const presentationInitial = request("/api/plan", presentationInput);
-const presentationTurns = [
-  {
-    before: null,
-    message: presentationInput.requirements,
-    response: presentationInitial,
-    after: null,
-  },
-];
-if (presentationInitial.status === 200) {
-  let current = fromInitial(
-    presentationInput,
-    presentationInitial.body,
-    "rl-presentation",
-  );
-  current = addConversation(
-    current,
-    presentationInput.requirements,
-    presentationInitial.body.assistantMessage,
-  );
-  for (const message of [
-    "我觉得这个presentation的准备工作太多了，可以先帮我找出最重要的三个步骤吗？",
-    "Great. Let's keep discussing in English from now on.",
-  ]) {
-    const result = refineTurn(current, message);
-    presentationTurns.push(result.turn);
-    current = result.next;
+if (shouldRun(13)) {
+  console.log("[13/15] running Switching Conversation Language");
+  const presentationInitial = request("/api/plan", presentationInput);
+  const presentationTurns = [
+    {
+      before: null,
+      message: presentationInput.requirements,
+      response: presentationInitial,
+      after: null,
+    },
+  ];
+  if (presentationInitial.status === 200) {
+    let current = fromInitial(
+      presentationInput,
+      presentationInitial.body,
+      "rl-presentation",
+    );
+    current = addConversation(
+      current,
+      presentationInput.requirements,
+      presentationInitial.body.assistantMessage,
+    );
+    for (const message of [
+      "我觉得这个presentation的准备工作太多了，可以先帮我找出最重要的三个步骤吗？",
+      "Great. Let's keep discussing in English from now on.",
+    ]) {
+      const result = refineTurn(current, message);
+      presentationTurns.push(result.turn);
+      current = result.next;
+    }
   }
+  record({
+    id: 13,
+    name: "Switching Conversation Language",
+    input: [
+      presentationInput.requirements,
+      "我觉得这个presentation的准备工作太多了，可以先帮我找出最重要的三个步骤吗？",
+      "Great. Let's keep discussing in English from now on.",
+    ],
+    expected:
+      "第一轮全英文计划；第二轮中文列出最重要三步且不新建作业；第三轮切回英文并保持同一上下文。",
+    turns: presentationTurns,
+  });
 }
-record({
-  id: 13,
-  name: "Switching Conversation Language",
-  input: [
-    presentationInput.requirements,
-    "我觉得这个presentation的准备工作太多了，可以先帮我找出最重要的三个步骤吗？",
-    "Great. Let's keep discussing in English from now on.",
-  ],
-  expected:
-    "第一轮全英文计划；第二轮中文列出最重要三步且不新建作业；第三轮切回英文并保持同一上下文。",
-  turns: presentationTurns,
-});
 
 const rlDiscussionPlan = assignment({
   id: "rl-discussion",

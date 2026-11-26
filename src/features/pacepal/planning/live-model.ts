@@ -42,6 +42,44 @@ function modelUsage(usage: LanguageModelUsage): ModelUsage {
   };
 }
 
+function withoutTaskNoOps(
+  decision: RefinementDecision,
+  assignment: Assignment,
+): RefinementDecision {
+  const operations = decision.operations.filter((operation) => {
+    const task =
+      "taskId" in operation
+        ? assignment.subtasks.find((item) => item.id === operation.taskId)
+        : undefined;
+    if (operation.type === "set_status") {
+      return !task || task.status !== operation.status;
+    }
+    if (operation.type !== "update_task" || !task) return true;
+
+    const changes = operation.changes;
+    return (
+      (changes.title !== undefined && changes.title !== task.title) ||
+      (changes.description !== undefined &&
+        changes.description !== task.description) ||
+      (changes.estimatedMinutes !== undefined &&
+        changes.estimatedMinutes !== task.estimatedMinutes) ||
+      (changes.completionCriteria !== undefined &&
+        changes.completionCriteria !== task.completionCriteria) ||
+      (changes.difficulty !== undefined &&
+        changes.difficulty !== task.difficulty) ||
+      (changes.priority !== undefined &&
+        changes.priority !== task.taskPriority) ||
+      (changes.phase !== undefined && changes.phase !== task.phase) ||
+      (changes.dependencies !== undefined &&
+        JSON.stringify(changes.dependencies) !==
+          JSON.stringify(task.dependencies))
+    );
+  });
+  return operations.length === decision.operations.length
+    ? decision
+    : { ...decision, operations };
+}
+
 function decisionValidationError(
   decision: RefinementDecision,
   assignment: Assignment,
@@ -176,7 +214,10 @@ export async function generateLiveRefinement(
         system: refinementSystemPrompt(),
         prompt: refinementUserPrompt(assignment, message, ""),
       });
-      return { usage: response.usage, value: response.output };
+      return {
+        usage: response.usage,
+        value: withoutTaskNoOps(response.output, assignment),
+      };
     },
     validate: (value) => decisionValidationError(value, assignment),
   });
