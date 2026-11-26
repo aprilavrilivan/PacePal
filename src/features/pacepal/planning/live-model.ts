@@ -46,8 +46,11 @@ function decisionValidationError(
   decision: RefinementDecision,
   assignment: Assignment,
 ) {
-  if (decision.confirmation === "requested" && decision.operations.length > 0) {
-    return "A confirmation request must not contain operations.";
+  if (decision.confirmation === "requested") {
+    // The service always discards proposed operations until the user confirms.
+    // Treating an otherwise useful confirmation question as provider failure
+    // would turn a safe no-op into an unnecessary 503.
+    return "";
   }
   const destructive = decision.operations.some((operation) =>
     ["delete_task", "merge_tasks"].includes(operation.type),
