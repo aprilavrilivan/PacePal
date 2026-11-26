@@ -10,7 +10,9 @@ const outputPath =
 const selectedTestIds = new Set(
   (process.env.PACEPAL_EVAL_TESTS ?? "")
     .split(",")
-    .map((value) => Number(value.trim()))
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map(Number)
     .filter(Number.isInteger),
 );
 const createdAt = "2026-11-26T00:00:00.000Z";
