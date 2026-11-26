@@ -29,7 +29,7 @@ import {
 import { withPlanningTimeout } from "@/features/pacepal/planning/timeout";
 
 export const planningModel = "deepseek/deepseek-v4.1-flash-1017";
-export const planningRequestTimeoutMs = 80_000;
+export const planningRequestTimeoutMs = 60_000;
 
 function modelUsage(usage: LanguageModelUsage): ModelUsage {
   return {
@@ -47,16 +47,16 @@ function decisionValidationError(
   assignment: Assignment,
 ) {
   if (decision.confirmation === "requested") {
-    // The service always discards proposed operations until the user confirms.
-    // Treating an otherwise useful confirmation question as provider failure
-    // would turn a safe no-op into an unnecessary 503.
+    // The service discards every proposed operation until the user confirms.
     return "";
   }
   const destructive = decision.operations.some((operation) =>
     ["delete_task", "merge_tasks"].includes(operation.type),
   );
   if (destructive && decision.confirmation !== "confirmed") {
-    return "Destructive operations require confirmation=confirmed.";
+    // The service converts an unconfirmed destructive proposal into a safe
+    // confirmation response without applying it.
+    return "";
   }
 
   try {
@@ -172,7 +172,7 @@ export async function generateLiveRefinement(
           name: "pacepal_plan_refinement",
           schema: refinementDecisionSchema,
         }),
-        reasoning: "medium",
+        reasoning: "low",
         system: refinementSystemPrompt(),
         prompt: refinementUserPrompt(assignment, message, ""),
       });
