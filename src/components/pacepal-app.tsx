@@ -1,7 +1,14 @@
 "use client";
 
 import type { User } from "@supabase/supabase-js";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { CalendarMonthView } from "@/components/calendar-month-view";
 import { FlipCountdown } from "@/components/flip-countdown";
@@ -51,6 +58,17 @@ type TodayPlanDraftItem = TaskSelection & {
   blockId: string;
   durationMinutes: number;
 };
+type FloatingPosition = { bottom: number; right: number };
+type TodayPlanDragState = {
+  height: number;
+  moved: boolean;
+  originBottom: number;
+  originRight: number;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  width: number;
+};
 
 const emptyForm: AssignmentInput = {
   title: "",
@@ -82,6 +100,10 @@ const statusLabels: Record<Subtask["status"], string> = {
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(Math.max(value, minimum), maximum);
 }
 
 function formatDate(value: string) {
@@ -208,10 +230,17 @@ export function PacePalApp() {
   const [focusTimer, setFocusTimer] = useState<FocusTimerState | null>(null);
   const [todayPlanOpen, setTodayPlanOpen] = useState(false);
   const [todayPlanEditing, setTodayPlanEditing] = useState(false);
+  const [todayPlanPosition, setTodayPlanPosition] = useState<FloatingPosition>({
+    bottom: 24,
+    right: 24,
+  });
   const [todayPlanStartTime, setTodayPlanStartTime] = useState("09:00");
   const [todayPlanDraft, setTodayPlanDraft] = useState<TodayPlanDraftItem[]>(
     [],
   );
+  const todayPlanRef = useRef<HTMLElement | null>(null);
+  const todayPlanDragRef = useRef<TodayPlanDragState | null>(null);
+  const suppressTodayPlanClickRef = useRef(false);
   const userId = user?.id ?? null;
 
   const hasRunningTask = appState.assignments.some((item) =>
@@ -226,6 +255,58 @@ export function PacePalApp() {
     const timer = window.setInterval(() => setClockTick(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [hasRunningTask]);
+
+  useEffect(() => {
+    if (!todayPlanOpen) return;
+
+    function collapseOnOutsidePointer(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        todayPlanRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+      setTodayPlanOpen(false);
+      setTodayPlanEditing(false);
+    }
+
+    document.addEventListener("pointerdown", collapseOnOutsidePointer);
+    return () =>
+      document.removeEventListener("pointerdown", collapseOnOutsidePointer);
+  }, [todayPlanOpen]);
+
+  useEffect(() => {
+    function keepTodayPlanInViewport() {
+      const bounds = todayPlanRef.current?.getBoundingClientRect();
+      if (!bounds) return;
+      setTodayPlanPosition((current) => {
+        const next = {
+          bottom: clamp(
+            current.bottom,
+            16,
+            Math.max(16, window.innerHeight - bounds.height - 16),
+          ),
+          right: clamp(
+            current.right,
+            16,
+            Math.max(16, window.innerWidth - bounds.width - 16),
+          ),
+        };
+        return next.bottom === current.bottom && next.right === current.right
+          ? current
+          : next;
+      });
+    }
+
+    const animationFrame = window.requestAnimationFrame(
+      keepTodayPlanInViewport,
+    );
+    window.addEventListener("resize", keepTodayPlanInViewport);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", keepTodayPlanInViewport);
+    };
+  }, [todayPlanOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -898,6 +979,77 @@ export function PacePalApp() {
         ? { ...current, remainingSeconds: availableMinutes * 60 }
         : current,
     );
+  }
+
+  function beginTodayPlanDrag(event: ReactPointerEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+    if (
+      todayPlanOpen &&
+      event.target instanceof Element &&
+      event.target.closest("button, input, select, textarea, a")
+    ) {
+      return;
+    }
+
+    const bounds = todayPlanRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+
+    todayPlanDragRef.current = {
+      height: bounds.height,
+      moved: false,
+      originBottom: todayPlanPosition.bottom,
+      originRight: todayPlanPosition.right,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      width: bounds.width,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveTodayPlan(event: ReactPointerEvent<HTMLElement>) {
+    const drag = todayPlanDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(deltaX, deltaY) < 5) return;
+
+    drag.moved = true;
+    event.preventDefault();
+    setTodayPlanPosition({
+      bottom: clamp(
+        drag.originBottom - deltaY,
+        16,
+        Math.max(16, window.innerHeight - drag.height - 16),
+      ),
+      right: clamp(
+        drag.originRight - deltaX,
+        16,
+        Math.max(16, window.innerWidth - drag.width - 16),
+      ),
+    });
+  }
+
+  function endTodayPlanDrag(event: ReactPointerEvent<HTMLElement>) {
+    const drag = todayPlanDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    todayPlanDragRef.current = null;
+    suppressTodayPlanClickRef.current = drag.moved;
+    if (drag.moved) {
+      window.setTimeout(() => {
+        suppressTodayPlanClickRef.current = false;
+      }, 150);
+    }
+  }
+
+  function openTodayPlan() {
+    if (suppressTodayPlanClickRef.current) return;
+    setTodayPlanOpen(true);
   }
 
   function openTodayPlanEditor() {
@@ -1620,9 +1772,6 @@ export function PacePalApp() {
     (manualRecommendedTask ? manualRecommendedAssignment : null) ??
     recommendation?.assignment ??
     assignment;
-  const recommendationReasons = manualRecommendedTask
-    ? ["手动选择", "按你的决定开始"]
-    : (recommendation?.reasons ?? []);
   const recommendedBlock = recommendedTask
     ? (recommendedAssignment.schedule.find(
         (block) =>
@@ -1775,77 +1924,65 @@ export function PacePalApp() {
         {dashboardView === "overview" ? (
           <section className="space-y-5">
             <section className={`${surfaceClassName} overflow-hidden`}>
-              {recommendedTask ? (
-                <>
-                  <div className="border-b border-slate-100 px-6 py-5 sm:px-8">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-sm font-semibold tracking-wide text-slate-500">
-                        接下来最值得推进
-                      </p>
-                      <div className="flex items-center gap-2 text-sm font-semibold text-violet-600">
-                        <span>{statusLabels[recommendedTask.status]}</span>
-                        <span aria-hidden="true" className="text-slate-300">
-                          ·
-                        </span>
-                        <span>
-                          本轮 {assignment.checkIn.availableMinutes} 分钟
-                        </span>
-                      </div>
-                    </div>
+              {focusTimerRunning && recommendedTask ? (
+                <div
+                  className="flex min-h-[42rem] flex-col items-center justify-center gap-12 bg-[#11131c] px-5 py-12 text-white sm:px-10 lg:min-h-[46rem] lg:px-16"
+                  data-testid="focus-mode"
+                >
+                  <div className="w-full max-w-5xl">
+                    <FlipCountdown
+                      immersive
+                      isRunning
+                      remainingSeconds={focusRemainingSeconds}
+                    />
                   </div>
-
-                  <div className="grid min-h-[34rem] gap-8 px-6 py-8 sm:px-8 sm:py-10 lg:grid-cols-[minmax(0,0.82fr)_minmax(32rem,1.18fr)] lg:items-center lg:gap-12 lg:px-10 lg:py-12">
-                    <div className="flex h-full flex-col justify-center">
-                      <div>
-                        <h3 className="max-w-2xl text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-4xl">
-                          {recommendedTask.title}
-                        </h3>
-                        <button
-                          className="mt-3 text-base font-semibold text-violet-600"
-                          onClick={() =>
-                            selectAssignment(recommendedAssignment.id, "tasks")
-                          }
-                          type="button"
-                        >
-                          {recommendedAssignment.title}
-                        </button>
-                        <div className="mt-5 flex flex-wrap gap-2">
-                          {recommendationReasons.map((reason) => (
-                            <span
-                              className="rounded-full bg-violet-50 px-3 py-1.5 text-sm font-semibold text-violet-700"
-                              key={reason}
-                            >
-                              {reason}
-                            </span>
-                          ))}
-                        </div>
-                        <p className="mt-6 max-w-2xl text-base leading-7 text-slate-600">
-                          {recommendedTask.completionCriteria}
-                        </p>
-                        {recommendedBlock ? (
-                          <p className="mt-6 text-sm font-semibold text-slate-500">
-                            {formatScheduleDate(recommendedBlock.date)} ·{" "}
-                            {recommendedBlock.startTime}
-                          </p>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-9 flex flex-wrap gap-2">
-                        {recommendedTask.status === "in_progress" ? (
+                  <button
+                    className="inline-flex min-h-12 items-center justify-center rounded-xl border border-white/15 bg-white/10 px-7 py-3 font-semibold text-white transition hover:bg-white/15 focus:ring-4 focus:ring-violet-400/30 focus:outline-none"
+                    onClick={() =>
+                      pauseFocusTask(
+                        recommendedTask.id,
+                        recommendedAssignment.id,
+                        focusRemainingSeconds,
+                      )
+                    }
+                    type="button"
+                  >
+                    暂停
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {recommendedTask ? (
+                    <div className="grid min-h-[34rem] gap-8 px-6 py-8 sm:px-8 sm:py-10 lg:grid-cols-[minmax(0,0.82fr)_minmax(32rem,1.18fr)] lg:items-center lg:gap-12 lg:px-10 lg:py-12">
+                      <div className="flex h-full flex-col justify-center">
+                        <div>
+                          <h3 className="max-w-2xl text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-4xl">
+                            {recommendedTask.title}
+                          </h3>
                           <button
-                            className={secondaryButtonClassName}
+                            className="mt-3 text-base font-semibold text-violet-600"
                             onClick={() =>
-                              pauseFocusTask(
-                                recommendedTask.id,
+                              selectAssignment(
                                 recommendedAssignment.id,
-                                focusRemainingSeconds,
+                                "tasks",
                               )
                             }
                             type="button"
                           >
-                            暂停
+                            {recommendedAssignment.title}
                           </button>
-                        ) : (
+                          <p className="mt-6 max-w-2xl text-base leading-7 text-slate-600">
+                            {recommendedTask.completionCriteria}
+                          </p>
+                          {recommendedBlock ? (
+                            <p className="mt-6 text-sm font-semibold text-slate-500">
+                              {formatScheduleDate(recommendedBlock.date)} ·{" "}
+                              {recommendedBlock.startTime}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div className="mt-9 flex flex-wrap gap-2">
                           <button
                             className={primaryButtonClassName}
                             onClick={() =>
@@ -1863,179 +2000,162 @@ export function PacePalApp() {
                                 : "再来一轮"
                               : "开始"}
                           </button>
-                        )}
-                        <button
-                          className={secondaryButtonClassName}
-                          onClick={() =>
-                            completeFocusTask(
-                              recommendedTask.id,
-                              recommendedAssignment.id,
-                            )
-                          }
-                          type="button"
-                        >
-                          完成
-                        </button>
-                        <button
-                          className={textButtonClassName}
-                          onClick={() =>
-                            setRecommendationPickerOpen((open) => !open)
-                          }
-                          type="button"
-                        >
-                          手动选择
-                        </button>
-                      </div>
-
-                      {recommendationPickerOpen ? (
-                        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                          <label
-                            className="text-sm font-semibold text-slate-600"
-                            htmlFor="manual-recommendation"
+                          <button
+                            className={secondaryButtonClassName}
+                            onClick={() =>
+                              completeFocusTask(
+                                recommendedTask.id,
+                                recommendedAssignment.id,
+                              )
+                            }
+                            type="button"
                           >
-                            选择子任务
-                          </label>
-                          <select
-                            className={fieldClassName}
-                            id="manual-recommendation"
-                            onChange={(event) => {
-                              const [assignmentId, subtaskId] =
-                                event.target.value.split("::");
-                              if (!assignmentId || !subtaskId) return;
-                              setManualRecommendation({
-                                assignmentId,
-                                subtaskId,
-                              });
-                              setRecommendationPickerOpen(false);
-                            }}
-                            value=""
+                            完成
+                          </button>
+                          <button
+                            className={textButtonClassName}
+                            onClick={() =>
+                              setRecommendationPickerOpen((open) => !open)
+                            }
+                            type="button"
                           >
-                            <option value="">选择一个待完成子任务</option>
-                            {pendingTaskOptions.map(
-                              ({ assignment: item, task }) => (
-                                <option
-                                  key={`${item.id}-${task.id}`}
-                                  value={`${item.id}::${task.id}`}
-                                >
-                                  {item.title} · {task.title}
-                                </option>
-                              ),
-                            )}
-                          </select>
+                            手动选择
+                          </button>
                         </div>
-                      ) : null}
-                    </div>
 
-                    <div className="flex min-h-[25rem] flex-col items-center justify-center rounded-[1.75rem] bg-[#11131c] px-4 py-8 text-white shadow-[0_24px_55px_rgba(15,23,42,0.18)] sm:px-8 sm:py-10">
-                      <div className="mb-7 flex items-center gap-2 text-sm font-semibold tracking-[0.08em] text-slate-400">
-                        <span
-                          className={`size-2 rounded-full ${
-                            focusTimerRunning
-                              ? "animate-pulse bg-emerald-400"
-                              : "bg-slate-600"
-                          }`}
-                        />
-                        <span>
-                          {focusTimerRunning ? "本轮专注中" : "本轮专注倒计时"}
-                        </span>
+                        {recommendationPickerOpen ? (
+                          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                            <label
+                              className="text-sm font-semibold text-slate-600"
+                              htmlFor="manual-recommendation"
+                            >
+                              选择子任务
+                            </label>
+                            <select
+                              className={fieldClassName}
+                              id="manual-recommendation"
+                              onChange={(event) => {
+                                const [assignmentId, subtaskId] =
+                                  event.target.value.split("::");
+                                if (!assignmentId || !subtaskId) return;
+                                setManualRecommendation({
+                                  assignmentId,
+                                  subtaskId,
+                                });
+                                setRecommendationPickerOpen(false);
+                              }}
+                              value=""
+                            >
+                              <option value="">选择一个待完成子任务</option>
+                              {pendingTaskOptions.map(
+                                ({ assignment: item, task }) => (
+                                  <option
+                                    key={`${item.id}-${task.id}`}
+                                    value={`${item.id}::${task.id}`}
+                                  >
+                                    {item.title} · {task.title}
+                                  </option>
+                                ),
+                              )}
+                            </select>
+                          </div>
+                        ) : null}
                       </div>
-                      <FlipCountdown
-                        isRunning={focusTimerRunning}
-                        remainingSeconds={focusRemainingSeconds}
-                      />
-                      <p
-                        aria-live="polite"
-                        className="mt-8 text-center text-sm font-medium text-slate-400"
-                      >
-                        {focusRemainingSeconds === 0
-                          ? "本轮时间到了，可以完成任务或再开始一轮。"
-                          : focusTimerRunning
-                            ? "保持节奏，专注完成眼前这一步。"
-                            : "在下方调整可用时间，再开始本轮专注。"}
-                      </p>
+
+                      <div className="flex min-h-[25rem] flex-col items-center justify-center rounded-[1.75rem] bg-[#11131c] px-4 py-8 text-white shadow-[0_24px_55px_rgba(15,23,42,0.18)] sm:px-8 sm:py-10">
+                        <div className="mb-7 flex items-center gap-2 text-sm font-semibold tracking-[0.08em] text-slate-400">
+                          <span className="size-2 rounded-full bg-slate-600" />
+                          <span>本轮专注倒计时</span>
+                        </div>
+                        <FlipCountdown
+                          isRunning={false}
+                          remainingSeconds={focusRemainingSeconds}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="min-h-[26rem] p-8 sm:p-10">
+                      <h2 className="text-2xl font-semibold text-slate-950">
+                        {completedCount === assignment.subtasks.length
+                          ? "当前计划已完成"
+                          : "当前没有可开始的任务"}
+                      </h2>
+                      {assignment.subtasks
+                        .filter((task) => task.status === "blocked")
+                        .map((task) => (
+                          <button
+                            className={`${secondaryButtonClassName} mt-5`}
+                            key={task.id}
+                            onClick={() => splitBlockedTask(task.id)}
+                            type="button"
+                          >
+                            拆小一步
+                          </button>
+                        ))}
+                    </div>
+                  )}
+
+                  <div className="border-t border-slate-100 bg-slate-50/70 px-6 py-6 sm:px-8 lg:px-10">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <FormField label="计划用时">
+                        <select
+                          className={fieldClassName}
+                          id="check-in-time"
+                          onChange={(event) =>
+                            updateFocusBudget(Number(event.target.value))
+                          }
+                          value={assignment.checkIn.availableMinutes}
+                        >
+                          <option value={15}>15 分钟</option>
+                          <option value={30}>30 分钟</option>
+                          <option value={60}>60 分钟</option>
+                          <option value={90}>90 分钟</option>
+                        </select>
+                      </FormField>
+                      <FormField label="精力">
+                        <select
+                          className={fieldClassName}
+                          id="check-in-energy"
+                          onChange={(event) =>
+                            updateCheckIn({
+                              energy: event.target.value as Energy,
+                            })
+                          }
+                          value={assignment.checkIn.energy}
+                        >
+                          <option value="low">较低</option>
+                          <option value="medium">正常</option>
+                          <option value="high">充足</option>
+                        </select>
+                      </FormField>
                     </div>
                   </div>
                 </>
-              ) : (
-                <div className="min-h-[26rem] p-8 sm:p-10">
-                  <h2 className="text-2xl font-semibold text-slate-950">
-                    {completedCount === assignment.subtasks.length
-                      ? "当前计划已完成"
-                      : "当前没有可开始的任务"}
-                  </h2>
-                  {assignment.subtasks
-                    .filter((task) => task.status === "blocked")
-                    .map((task) => (
-                      <button
-                        className={`${secondaryButtonClassName} mt-5`}
-                        key={task.id}
-                        onClick={() => splitBlockedTask(task.id)}
-                        type="button"
-                      >
-                        拆小一步
-                      </button>
-                    ))}
-                </div>
               )}
-
-              <div className="border-t border-slate-100 bg-slate-50/70 px-6 py-6 sm:px-8 lg:px-10">
-                <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-                  <div className="max-w-md">
-                    <h2 className="text-lg font-semibold text-slate-950">
-                      此刻可用时间 / 精力状态
-                    </h2>
-                    <p className="mt-1.5 text-sm leading-6 text-slate-500">
-                      可用时间会直接设置翻页钟的本轮起始预算。
-                    </p>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2 lg:w-[35rem]">
-                    <FormField label="可用时间">
-                      <select
-                        className={fieldClassName}
-                        disabled={focusTimerRunning}
-                        id="check-in-time"
-                        onChange={(event) =>
-                          updateFocusBudget(Number(event.target.value))
-                        }
-                        value={assignment.checkIn.availableMinutes}
-                      >
-                        <option value={15}>15 分钟</option>
-                        <option value={30}>30 分钟</option>
-                        <option value={60}>60 分钟</option>
-                        <option value={90}>90 分钟</option>
-                      </select>
-                    </FormField>
-                    <FormField label="精力">
-                      <select
-                        className={fieldClassName}
-                        id="check-in-energy"
-                        onChange={(event) =>
-                          updateCheckIn({
-                            energy: event.target.value as Energy,
-                          })
-                        }
-                        value={assignment.checkIn.energy}
-                      >
-                        <option value="low">较低</option>
-                        <option value="medium">正常</option>
-                        <option value="high">充足</option>
-                      </select>
-                    </FormField>
-                  </div>
-                </div>
-              </div>
             </section>
 
             <aside
               aria-label="今日计划"
-              className="fixed right-4 bottom-4 z-40 w-[min(28rem,calc(100vw-2rem))] lg:right-8 lg:bottom-8"
+              className="fixed z-40 w-[min(28rem,calc(100vw-2rem))]"
+              ref={todayPlanRef}
+              style={{
+                bottom: todayPlanPosition.bottom,
+                right: todayPlanPosition.right,
+              }}
             >
               {todayPlanOpen ? (
                 <section
                   className={`${surfaceClassName} max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 shadow-[0_24px_70px_rgba(39,39,76,0.20)] sm:p-6 lg:max-h-[calc(100dvh-4rem)]`}
                   id="today-plan-panel"
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div
+                    className="flex cursor-grab touch-none flex-wrap items-center justify-between gap-3 active:cursor-grabbing"
+                    onPointerCancel={endTodayPlanDrag}
+                    onPointerDown={beginTodayPlanDrag}
+                    onPointerMove={moveTodayPlan}
+                    onPointerUp={endTodayPlanDrag}
+                    title="拖动今日计划"
+                  >
                     <div>
                       <h2 className="text-lg font-semibold text-slate-950">
                         今日计划
@@ -2078,7 +2198,10 @@ export function PacePalApp() {
                         aria-expanded="true"
                         aria-label="收起今日计划"
                         className="flex size-10 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
-                        onClick={() => setTodayPlanOpen(false)}
+                        onClick={() => {
+                          setTodayPlanOpen(false);
+                          setTodayPlanEditing(false);
+                        }}
                         type="button"
                       >
                         <svg
@@ -2289,8 +2412,12 @@ export function PacePalApp() {
                   aria-controls="today-plan-panel"
                   aria-expanded="false"
                   aria-label="展开今日计划"
-                  className="ml-auto flex w-full items-center gap-3 rounded-2xl border border-violet-200 bg-white p-3.5 text-left shadow-[0_18px_50px_rgba(39,39,76,0.18)] transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-[0_22px_58px_rgba(39,39,76,0.22)] focus:ring-4 focus:ring-violet-500/15 focus:outline-none sm:w-auto sm:min-w-64"
-                  onClick={() => setTodayPlanOpen(true)}
+                  className="ml-auto flex w-full cursor-grab touch-none items-center gap-3 rounded-2xl border border-violet-200 bg-white p-3.5 text-left shadow-[0_18px_50px_rgba(39,39,76,0.18)] transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-[0_22px_58px_rgba(39,39,76,0.22)] focus:ring-4 focus:ring-violet-500/15 focus:outline-none active:cursor-grabbing sm:w-auto sm:min-w-64"
+                  onClick={openTodayPlan}
+                  onPointerCancel={endTodayPlanDrag}
+                  onPointerDown={beginTodayPlanDrag}
+                  onPointerMove={moveTodayPlan}
+                  onPointerUp={endTodayPlanDrag}
                   type="button"
                 >
                   <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#5b55df] text-white shadow-[0_8px_20px_rgba(91,85,223,0.25)]">

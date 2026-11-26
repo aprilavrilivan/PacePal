@@ -189,7 +189,20 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(page.getByRole("heading", { name: "当前推荐" })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "此刻可用时间 / 精力状态" }),
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await expect(page.getByText("接下来最值得推进", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByText("当前可推进", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("匹配当前精力", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("适合可用时间", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText("在下方调整可用时间，再开始本轮专注。", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("计划用时")).toBeVisible();
+  await expect(page.getByLabel("精力")).toBeVisible();
   await expect(page.getByRole("timer")).toHaveAttribute(
     "aria-label",
     "倒计时 0小时30分0秒",
@@ -207,7 +220,25 @@ test("creates, approves, schedules, and persists an assignment", async ({
     page.getByRole("button", { name: "展开今日计划" }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "今日计划" })).toHaveCount(0);
-  await page.getByRole("button", { name: "展开今日计划" }).click();
+  const todayPlanTrigger = page.getByRole("button", {
+    name: "展开今日计划",
+  });
+  const beforeDrag = await todayPlanTrigger.boundingBox();
+  if (!beforeDrag) throw new Error("今日计划悬浮窗不可见");
+  await page.mouse.move(
+    beforeDrag.x + beforeDrag.width / 2,
+    beforeDrag.y + beforeDrag.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(beforeDrag.x - 70, beforeDrag.y - 50, { steps: 8 });
+  await page.mouse.up();
+  const afterDrag = await todayPlanTrigger.boundingBox();
+  if (!afterDrag) throw new Error("拖动后的今日计划悬浮窗不可见");
+  expect(afterDrag.x).toBeLessThan(beforeDrag.x - 30);
+  expect(afterDrag.y).toBeLessThan(beforeDrag.y - 20);
+  await expect(page.getByRole("heading", { name: "今日计划" })).toHaveCount(0);
+  await page.waitForTimeout(180);
+  await todayPlanTrigger.click();
   await expect(page.getByRole("heading", { name: "今日计划" })).toBeVisible();
   await expect(page.getByText("09:00", { exact: true }).first()).toBeVisible();
 
@@ -222,12 +253,12 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(
     page.getByRole("progressbar", { name: "今日任务进度" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "收起今日计划" }).click();
+  await page.getByRole("heading", { name: "当前推荐" }).click();
   await expect(
     page.getByRole("button", { name: "展开今日计划" }),
   ).toBeVisible();
 
-  await page.getByLabel("可用时间").selectOption("30");
+  await page.getByLabel("计划用时").selectOption("30");
   await page.getByRole("button", { name: "手动选择" }).click();
   await page.getByLabel("选择子任务").selectOption({ index: 2 });
   await page.getByRole("button", { exact: true, name: "开始" }).click();
@@ -236,12 +267,25 @@ test("creates, approves, schedules, and persists an assignment", async ({
     /倒计时 0小时29分5[89]秒/,
     { timeout: 3_000 },
   );
-  await expect(page.getByText("进行中", { exact: true }).last()).toBeVisible();
+  const focusMode = page.getByTestId("focus-mode");
+  await expect(focusMode).toBeVisible();
+  await expect(focusMode.getByRole("button")).toHaveCount(1);
+  await expect(
+    focusMode.getByRole("button", { exact: true, name: "暂停" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("计划用时")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { exact: true, name: "完成" }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "手动选择" })).toHaveCount(0);
   await page.getByRole("button", { exact: true, name: "暂停" }).click();
-  await expect(page.getByText("已暂停", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("可用时间")).toBeEnabled();
+  await expect(focusMode).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { exact: true, name: "继续" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("计划用时")).toBeEnabled();
   await page.getByRole("button", { exact: true, name: "继续" }).click();
-  await expect(page.getByLabel("可用时间")).toBeDisabled();
+  await expect(page.getByLabel("计划用时")).toHaveCount(0);
   await page.getByRole("button", { exact: true, name: "暂停" }).click();
 
   await page.getByRole("button", { exact: true, name: "任务" }).click();

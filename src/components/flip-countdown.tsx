@@ -1,4 +1,5 @@
 type FlipCountdownProps = {
+  immersive?: boolean;
   isRunning: boolean;
   remainingSeconds: number;
 };
@@ -17,11 +18,23 @@ function timeParts(totalSeconds: number) {
   };
 }
 
-function FlipDigit({ digit, position }: { digit: string; position: number }) {
+function FlipDigit({
+  digit,
+  immersive,
+  position,
+}: {
+  digit: string;
+  immersive: boolean;
+  position: number;
+}) {
   return (
     <span
       aria-hidden="true"
-      className="relative flex min-w-10 flex-1 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-[#181b27] py-3 text-[clamp(2.7rem,7vw,5.5rem)] leading-none font-semibold tracking-[-0.08em] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_14px_30px_rgba(0,0,0,0.24)] sm:min-w-14 sm:rounded-2xl sm:py-5"
+      className={`relative flex min-w-10 flex-1 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-[#181b27] leading-none font-semibold tracking-[-0.08em] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_14px_30px_rgba(0,0,0,0.24)] sm:min-w-14 sm:rounded-2xl ${
+        immersive
+          ? "py-5 text-[clamp(3.1rem,10vw,8rem)] sm:py-8"
+          : "py-3 text-[clamp(2.7rem,7vw,5.5rem)] sm:py-5"
+      }`}
     >
       <span className="flip-clock-digit" key={`${position}-${digit}`}>
         {digit}
@@ -33,6 +46,7 @@ function FlipDigit({ digit, position }: { digit: string; position: number }) {
 }
 
 export function FlipCountdown({
+  immersive = false,
   isRunning,
   remainingSeconds,
 }: FlipCountdownProps) {
@@ -55,6 +69,7 @@ export function FlipCountdown({
               {group.split("").map((digit, digitIndex) => (
                 <FlipDigit
                   digit={digit}
+                  immersive={immersive}
                   key={`${digitIndex}-${digit}`}
                   position={groupIndex * 2 + digitIndex}
                 />
