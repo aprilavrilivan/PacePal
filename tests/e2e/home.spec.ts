@@ -186,11 +186,18 @@ test("creates, approves, schedules, and persists an assignment", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "确认任务计划" }).click();
 
-  await expect(page.getByRole("heading", { name: "今日重点" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "当前推荐" })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "此刻可用时间 / 精力状态" }),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "待完成任务" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "待完成任务" })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole("button", { name: "展开今日计划" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今日计划" })).toHaveCount(0);
+  await page.getByRole("button", { name: "展开今日计划" }).click();
   await expect(page.getByRole("heading", { name: "今日计划" })).toBeVisible();
   await expect(page.getByText("09:00", { exact: true }).first()).toBeVisible();
 
@@ -204,6 +211,10 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(page.getByText("10:15", { exact: true }).first()).toBeVisible();
   await expect(
     page.getByRole("progressbar", { name: "今日任务进度" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "收起今日计划" }).click();
+  await expect(
+    page.getByRole("button", { name: "展开今日计划" }),
   ).toBeVisible();
 
   await page.getByLabel("可用时间").selectOption("30");
@@ -219,6 +230,10 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(page.getByText("任务已延至明天，后续安排已重排")).toHaveCount(0);
 
   await page.getByRole("button", { exact: true, name: "任务" }).click();
+  await expect(
+    page.getByRole("progressbar", { name: "媒介研究课程论文完成进度" }),
+  ).toBeVisible();
+  await expect(page.getByText("中优先级", { exact: true })).toBeVisible();
   const assistantPanel = page.getByRole("complementary", {
     name: "AI 对话调整",
   });
@@ -233,6 +248,7 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await page.getByLabel("任务名称 2").fill("资料检索与核实");
   await page.getByLabel("任务名称 2").press("Tab");
   const manualRows = page.locator('[data-testid^="manual-subtask-"]');
+  await manualRows.nth(2).scrollIntoViewIfNeeded();
   await page
     .getByRole("button", { name: "拖动 理解任务要求" })
     .dragTo(manualRows.nth(2));
@@ -260,8 +276,10 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(page.getByText("资料检索与核实").first()).toBeVisible();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "今日重点" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "待完成任务" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "当前推荐" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "展开今日计划" }),
+  ).toBeVisible();
 });
 
 test("keeps multiple assignments and lets the user switch between them", async ({
@@ -291,7 +309,7 @@ test("keeps multiple assignments and lets the user switch between them", async (
   await createAssignment("课程论文", 10);
   await createAssignment("项目汇报", 5);
 
-  await expect(page.getByRole("heading", { name: "待完成任务" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "当前推荐" })).toBeVisible();
   await page.getByRole("button", { exact: true, name: "任务" }).click();
   await expect(page.getByRole("button", { name: /课程论文/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /项目汇报/ })).toBeVisible();

@@ -116,13 +116,6 @@ function tomorrowDateKey() {
   return dateKey(tomorrow);
 }
 
-function greetingText() {
-  const hour = new Date().getHours();
-  if (hour < 11) return "早上好";
-  if (hour < 18) return "下午好";
-  return "晚上好";
-}
-
 function addMinutesToTime(value: string, minutes: number) {
   const [hours, initialMinutes] = value.split(":").map(Number);
   const total = hours * 60 + initialMinutes + minutes;
@@ -221,6 +214,7 @@ export function PacePalApp() {
   const [recommendationPickerOpen, setRecommendationPickerOpen] =
     useState(false);
   const [clockTick, setClockTick] = useState(() => Date.now());
+  const [todayPlanOpen, setTodayPlanOpen] = useState(false);
   const [todayPlanEditing, setTodayPlanEditing] = useState(false);
   const [todayPlanStartTime, setTodayPlanStartTime] = useState("09:00");
   const [todayPlanDraft, setTodayPlanDraft] = useState<TodayPlanDraftItem[]>(
@@ -1502,9 +1496,6 @@ export function PacePalApp() {
       >
         <div className="mx-auto w-full max-w-[1180px] px-5 py-7 sm:px-8 lg:px-10 lg:py-10">
           <div className="pb-7">
-            <p className="mb-2 text-sm font-semibold text-violet-600">
-              {greetingText()}
-            </p>
             <h1 className="text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-[2.5rem]">
               开始新的任务计划
             </h1>
@@ -1643,13 +1634,6 @@ export function PacePalApp() {
   const todayBlocks = globalSchedule.filter(
     ({ block }) => block.date === currentDateKey(),
   );
-  const allSubtasks = assignments.flatMap((item) => item.subtasks);
-  const allRemainingMinutes = allSubtasks
-    .filter((task) => task.status !== "completed")
-    .reduce((total, task) => total + task.estimatedMinutes, 0);
-  const pendingAssignments = assignments.filter((item) =>
-    item.subtasks.some((task) => task.status !== "completed"),
-  );
   const pendingTaskOptions = assignments.flatMap((item) =>
     item.subtasks
       .filter(
@@ -1707,7 +1691,7 @@ export function PacePalApp() {
       )
     : 0;
   const viewTitles: Record<DashboardView, string> = {
-    overview: "今日重点",
+    overview: "当前推荐",
     schedule: "日历",
     tasks: "任务",
   };
@@ -1727,11 +1711,6 @@ export function PacePalApp() {
       >
         <div className="flex flex-col gap-5 pb-7 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            {dashboardView === "overview" ? (
-              <p className="mb-2 text-sm font-semibold text-violet-600">
-                {greetingText()}
-              </p>
-            ) : null}
             <h1 className="text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-[2.5rem]">
               {viewTitles[dashboardView]}
             </h1>
@@ -1769,70 +1748,6 @@ export function PacePalApp() {
 
         {dashboardView === "overview" ? (
           <section className="space-y-5">
-            <section className={`${surfaceClassName} overflow-hidden`}>
-              <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
-                <h2 className="text-lg font-semibold text-slate-950">
-                  待完成任务
-                </h2>
-                <span className="text-sm font-semibold text-slate-500">
-                  {allRemainingMinutes} 分钟
-                </span>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {pendingAssignments.map((item) => {
-                  const done = item.subtasks.filter(
-                    (task) => task.status === "completed",
-                  ).length;
-                  const progress = item.subtasks.length
-                    ? Math.round((done / item.subtasks.length) * 100)
-                    : 0;
-                  const priorityLabel =
-                    item.priority === "high"
-                      ? "高优先级"
-                      : item.priority === "low"
-                        ? "低优先级"
-                        : "中优先级";
-                  return (
-                    <button
-                      className="grid w-full gap-4 px-5 py-5 text-left transition hover:bg-slate-50 focus:bg-violet-50 focus:outline-none sm:grid-cols-[minmax(0,1fr)_auto_15rem] sm:items-center sm:px-6"
-                      key={item.id}
-                      onClick={() => selectAssignment(item.id, "tasks")}
-                      type="button"
-                    >
-                      <span className="min-w-0">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="truncate text-base font-semibold text-slate-950">
-                            {item.title}
-                          </span>
-                          <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
-                            {priorityLabel}
-                          </span>
-                        </span>
-                        <span className="mt-1.5 block truncate text-sm font-medium text-slate-500">
-                          {item.deliverable}
-                        </span>
-                      </span>
-                      <span className="text-sm font-semibold text-slate-500">
-                        截止 {formatDate(item.deadline)}
-                      </span>
-                      <span className="flex items-center gap-3">
-                        <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
-                          <span
-                            aria-label={`${item.title}完成进度`}
-                            className="block h-full rounded-full bg-[#5b55df] transition-[width]"
-                            style={{ width: `${progress}%` }}
-                          />
-                        </span>
-                        <span className="w-10 text-right text-sm font-semibold text-slate-500">
-                          {progress}%
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
             <section
               className={`${surfaceClassName} grid overflow-hidden lg:grid-cols-[1.35fr_0.65fr]`}
             >
@@ -1840,9 +1755,9 @@ export function PacePalApp() {
                 <div className="overflow-hidden">
                   <div className="border-b border-slate-100 px-6 py-5 sm:px-7">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <h2 className="text-lg font-semibold text-slate-950">
-                        当前推荐
-                      </h2>
+                      <p className="text-sm font-semibold tracking-wide text-slate-500">
+                        接下来最值得推进
+                      </p>
                       <div className="flex items-center gap-2 text-sm font-semibold text-violet-600">
                         <span>{statusLabels[recommendedTask.status]}</span>
                         <span className="text-slate-300" aria-hidden="true">
@@ -2077,218 +1992,314 @@ export function PacePalApp() {
               </div>
             </section>
 
-            <section className={`${surfaceClassName} p-5 sm:p-6`}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-slate-950">
-                  今日计划
-                </h2>
-                {todayPlanEditing ? (
-                  <div className="flex gap-2">
-                    <button
-                      className={textButtonClassName}
-                      onClick={() => setTodayPlanEditing(false)}
-                      type="button"
-                    >
-                      取消
-                    </button>
-                    <button
-                      className={primaryButtonClassName}
-                      disabled={!/^\d{2}:\d{2}$/.test(todayPlanStartTime)}
-                      onClick={saveTodayPlan}
-                      type="button"
-                    >
-                      保存今日计划
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    className={secondaryButtonClassName}
-                    onClick={openTodayPlanEditor}
-                    type="button"
-                  >
-                    手动调整今日计划
-                  </button>
-                )}
-              </div>
-
-              {todayPlanEditing ? (
-                <div className="mt-5">
-                  <div className="mb-5 max-w-56">
-                    <FormField label="开始时间">
-                      <input
-                        className={fieldClassName}
-                        id="today-plan-start-time"
-                        onChange={(event) =>
-                          setTodayPlanStartTime(event.target.value)
-                        }
-                        required
-                        type="time"
-                        value={todayPlanStartTime}
-                      />
-                    </FormField>
-                  </div>
-                  <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
-                    {todayPlanDraft.map((draft, index) => {
-                      const item = assignments.find(
-                        (candidate) => candidate.id === draft.assignmentId,
-                      );
-                      const task = item?.subtasks.find(
-                        (candidate) => candidate.id === draft.subtaskId,
-                      );
-                      if (!item || !task) return null;
-                      return (
-                        <li
-                          className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_8rem_auto] sm:items-center"
-                          key={draft.blockId}
+            <aside
+              aria-label="今日计划"
+              className="fixed right-4 bottom-4 z-40 w-[min(28rem,calc(100vw-2rem))] lg:right-8 lg:bottom-8"
+            >
+              {todayPlanOpen ? (
+                <section
+                  className={`${surfaceClassName} max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 shadow-[0_24px_70px_rgba(39,39,76,0.20)] sm:p-6 lg:max-h-[calc(100dvh-4rem)]`}
+                  id="today-plan-panel"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-semibold text-slate-950">
+                        今日计划
+                      </h2>
+                      <p className="mt-1 text-sm font-medium text-slate-500">
+                        {todayBlocks.length} 项 · 已完成 {todayProgress}%
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {todayPlanEditing ? (
+                        <>
+                          <button
+                            className={textButtonClassName}
+                            onClick={() => setTodayPlanEditing(false)}
+                            type="button"
+                          >
+                            取消
+                          </button>
+                          <button
+                            className={primaryButtonClassName}
+                            disabled={!/^\d{2}:\d{2}$/.test(todayPlanStartTime)}
+                            onClick={saveTodayPlan}
+                            type="button"
+                          >
+                            保存今日计划
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          aria-label="手动调整今日计划"
+                          className={secondaryButtonClassName}
+                          onClick={openTodayPlanEditor}
+                          type="button"
                         >
-                          <span className="min-w-0">
-                            <span className="block truncate font-semibold text-slate-900">
-                              {task.title}
-                            </span>
-                            <span className="mt-1 block truncate text-sm font-medium text-slate-500">
-                              {item.title}
-                            </span>
-                          </span>
-                          <label className="flex items-center gap-2 text-sm font-medium text-slate-500">
-                            <input
-                              aria-label={`${task.title}今日计划分钟`}
-                              className="w-20 rounded-lg border border-slate-200 px-3 py-2 text-right text-slate-900 outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10"
-                              min={5}
-                              onChange={(event) => {
-                                const durationMinutes = Math.max(
-                                  5,
-                                  Number(event.target.value) || 5,
-                                );
-                                setTodayPlanDraft((current) =>
-                                  current.map((entry) =>
-                                    entry.blockId === draft.blockId
-                                      ? { ...entry, durationMinutes }
-                                      : entry,
-                                  ),
-                                );
-                              }}
-                              step={5}
-                              type="number"
-                              value={draft.durationMinutes}
-                            />
-                            分钟
-                          </label>
-                          <span className="flex items-center justify-end gap-1">
-                            <button
-                              aria-label={`上移 ${task.title}`}
-                              className={textButtonClassName}
-                              disabled={index === 0}
-                              onClick={() => moveTodayPlanItem(index, -1)}
-                              type="button"
-                            >
-                              上移
-                            </button>
-                            <button
-                              aria-label={`下移 ${task.title}`}
-                              className={textButtonClassName}
-                              disabled={index === todayPlanDraft.length - 1}
-                              onClick={() => moveTodayPlanItem(index, 1)}
-                              type="button"
-                            >
-                              下移
-                            </button>
-                            <button
-                              aria-label={`移出今日计划 ${task.title}`}
-                              className={textButtonClassName}
-                              onClick={() =>
-                                setTodayPlanDraft((current) =>
-                                  current.filter(
-                                    (entry) => entry.blockId !== draft.blockId,
-                                  ),
-                                )
-                              }
-                              type="button"
-                            >
-                              移出
-                            </button>
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  <label
-                    className="mt-4 block text-sm font-semibold text-slate-600"
-                    htmlFor="add-today-task"
-                  >
-                    添加子任务
-                  </label>
-                  <select
-                    className={fieldClassName}
-                    id="add-today-task"
-                    onChange={(event) => {
-                      addTodayPlanTask(event.target.value);
-                      event.target.value = "";
-                    }}
-                    defaultValue=""
-                  >
-                    <option value="">选择待完成子任务</option>
-                    {pendingTaskOptions.map(({ assignment: item, task }) => (
-                      <option
-                        key={`${item.id}-${task.id}`}
-                        value={`${item.id}::${task.id}`}
+                          调整
+                        </button>
+                      )}
+                      <button
+                        aria-controls="today-plan-panel"
+                        aria-expanded="true"
+                        aria-label="收起今日计划"
+                        className="flex size-10 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
+                        onClick={() => setTodayPlanOpen(false)}
+                        type="button"
                       >
-                        {item.title} · {task.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <>
-                  <ul className="mt-4 divide-y divide-slate-100">
-                    {todayBlocks.map(({ assignment: item, block }) => (
-                      <li
-                        className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 py-3.5"
-                        key={`${item.id}-${block.id}`}
-                      >
-                        <span className="text-sm font-semibold text-slate-500">
-                          {block.startTime}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate font-semibold text-slate-800">
-                            {item.subtasks.find(
-                              (task) => task.id === block.subtaskId,
-                            )?.title ?? "任务"}
-                          </span>
-                          <span className="block truncate text-sm font-medium text-slate-400">
-                            {item.title}
-                          </span>
-                        </span>
-                        <span className="text-sm font-medium text-slate-400">
-                          {block.durationMinutes} 分钟
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  {todayBlocks.length === 0 ? (
-                    <p className="mt-5 text-slate-500">今天还没有安排任务。</p>
-                  ) : null}
-                  <div className="mt-6 border-t border-slate-100 pt-5">
-                    <div className="flex items-center justify-between gap-4 text-sm font-semibold">
-                      <span className="text-slate-600">今日任务进度</span>
-                      <span className="text-violet-700">{todayProgress}%</span>
-                    </div>
-                    <div
-                      aria-label="今日任务进度"
-                      aria-valuemax={100}
-                      aria-valuemin={0}
-                      aria-valuenow={todayProgress}
-                      className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100"
-                      role="progressbar"
-                    >
-                      <div
-                        className="h-full rounded-full bg-[#5b55df] transition-[width]"
-                        style={{ width: `${todayProgress}%` }}
-                      />
+                        <svg
+                          aria-hidden="true"
+                          className="size-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            d="m7 14 5-5 5 5"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                          />
+                        </svg>
+                      </button>
                     </div>
                   </div>
-                </>
+
+                  {todayPlanEditing ? (
+                    <div className="mt-5">
+                      <div className="mb-5 max-w-56">
+                        <FormField label="开始时间">
+                          <input
+                            className={fieldClassName}
+                            id="today-plan-start-time"
+                            onChange={(event) =>
+                              setTodayPlanStartTime(event.target.value)
+                            }
+                            required
+                            type="time"
+                            value={todayPlanStartTime}
+                          />
+                        </FormField>
+                      </div>
+                      <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                        {todayPlanDraft.map((draft, index) => {
+                          const item = assignments.find(
+                            (candidate) => candidate.id === draft.assignmentId,
+                          );
+                          const task = item?.subtasks.find(
+                            (candidate) => candidate.id === draft.subtaskId,
+                          );
+                          if (!item || !task) return null;
+                          return (
+                            <li
+                              className="grid gap-3 px-4 py-4"
+                              key={draft.blockId}
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate font-semibold text-slate-900">
+                                  {task.title}
+                                </span>
+                                <span className="mt-1 block truncate text-sm font-medium text-slate-500">
+                                  {item.title}
+                                </span>
+                              </span>
+                              <label className="flex items-center gap-2 text-sm font-medium text-slate-500">
+                                <input
+                                  aria-label={`${task.title}今日计划分钟`}
+                                  className="w-20 rounded-lg border border-slate-200 px-3 py-2 text-right text-slate-900 outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10"
+                                  min={5}
+                                  onChange={(event) => {
+                                    const durationMinutes = Math.max(
+                                      5,
+                                      Number(event.target.value) || 5,
+                                    );
+                                    setTodayPlanDraft((current) =>
+                                      current.map((entry) =>
+                                        entry.blockId === draft.blockId
+                                          ? { ...entry, durationMinutes }
+                                          : entry,
+                                      ),
+                                    );
+                                  }}
+                                  step={5}
+                                  type="number"
+                                  value={draft.durationMinutes}
+                                />
+                                分钟
+                              </label>
+                              <span className="flex flex-wrap items-center gap-1">
+                                <button
+                                  aria-label={`上移 ${task.title}`}
+                                  className={textButtonClassName}
+                                  disabled={index === 0}
+                                  onClick={() => moveTodayPlanItem(index, -1)}
+                                  type="button"
+                                >
+                                  上移
+                                </button>
+                                <button
+                                  aria-label={`下移 ${task.title}`}
+                                  className={textButtonClassName}
+                                  disabled={index === todayPlanDraft.length - 1}
+                                  onClick={() => moveTodayPlanItem(index, 1)}
+                                  type="button"
+                                >
+                                  下移
+                                </button>
+                                <button
+                                  aria-label={`移出今日计划 ${task.title}`}
+                                  className={textButtonClassName}
+                                  onClick={() =>
+                                    setTodayPlanDraft((current) =>
+                                      current.filter(
+                                        (entry) =>
+                                          entry.blockId !== draft.blockId,
+                                      ),
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  移出
+                                </button>
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      <label
+                        className="mt-4 block text-sm font-semibold text-slate-600"
+                        htmlFor="add-today-task"
+                      >
+                        添加子任务
+                      </label>
+                      <select
+                        className={fieldClassName}
+                        id="add-today-task"
+                        onChange={(event) => {
+                          addTodayPlanTask(event.target.value);
+                          event.target.value = "";
+                        }}
+                        defaultValue=""
+                      >
+                        <option value="">选择待完成子任务</option>
+                        {pendingTaskOptions.map(
+                          ({ assignment: item, task }) => (
+                            <option
+                              key={`${item.id}-${task.id}`}
+                              value={`${item.id}::${task.id}`}
+                            >
+                              {item.title} · {task.title}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </div>
+                  ) : (
+                    <>
+                      <ul className="mt-4 divide-y divide-slate-100">
+                        {todayBlocks.map(({ assignment: item, block }) => (
+                          <li
+                            className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 py-3.5"
+                            key={`${item.id}-${block.id}`}
+                          >
+                            <span className="text-sm font-semibold text-slate-500">
+                              {block.startTime}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block truncate font-semibold text-slate-800">
+                                {item.subtasks.find(
+                                  (task) => task.id === block.subtaskId,
+                                )?.title ?? "任务"}
+                              </span>
+                              <span className="block truncate text-sm font-medium text-slate-400">
+                                {item.title}
+                              </span>
+                            </span>
+                            <span className="text-sm font-medium text-slate-400">
+                              {block.durationMinutes} 分钟
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      {todayBlocks.length === 0 ? (
+                        <p className="mt-5 text-slate-500">
+                          今天还没有安排任务。
+                        </p>
+                      ) : null}
+                      <div className="mt-6 border-t border-slate-100 pt-5">
+                        <div className="flex items-center justify-between gap-4 text-sm font-semibold">
+                          <span className="text-slate-600">今日任务进度</span>
+                          <span className="text-violet-700">
+                            {todayProgress}%
+                          </span>
+                        </div>
+                        <div
+                          aria-label="今日任务进度"
+                          aria-valuemax={100}
+                          aria-valuemin={0}
+                          aria-valuenow={todayProgress}
+                          className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100"
+                          role="progressbar"
+                        >
+                          <div
+                            className="h-full rounded-full bg-[#5b55df] transition-[width]"
+                            style={{ width: `${todayProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </section>
+              ) : (
+                <button
+                  aria-controls="today-plan-panel"
+                  aria-expanded="false"
+                  aria-label="展开今日计划"
+                  className="ml-auto flex w-full items-center gap-3 rounded-2xl border border-violet-200 bg-white p-3.5 text-left shadow-[0_18px_50px_rgba(39,39,76,0.18)] transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-[0_22px_58px_rgba(39,39,76,0.22)] focus:ring-4 focus:ring-violet-500/15 focus:outline-none sm:w-auto sm:min-w-64"
+                  onClick={() => setTodayPlanOpen(true)}
+                  type="button"
+                >
+                  <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#5b55df] text-white shadow-[0_8px_20px_rgba(91,85,223,0.25)]">
+                    <svg
+                      aria-hidden="true"
+                      className="size-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.8"
+                      />
+                    </svg>
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-semibold text-slate-950">
+                      今日计划
+                    </span>
+                    <span className="mt-0.5 block text-sm font-medium text-slate-500">
+                      {todayBlocks.length} 项 · {todayProgress}%
+                    </span>
+                  </span>
+                  <svg
+                    aria-hidden="true"
+                    className="size-5 shrink-0 text-slate-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="m9 7 5 5-5 5"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                    />
+                  </svg>
+                </button>
               )}
-            </section>
+            </aside>
           </section>
         ) : null}
 
@@ -2299,11 +2310,20 @@ export function PacePalApp() {
                 const done = item.subtasks.filter(
                   (task) => task.status === "completed",
                 ).length;
+                const progress = item.subtasks.length
+                  ? Math.round((done / item.subtasks.length) * 100)
+                  : 0;
+                const priorityLabel =
+                  item.priority === "high"
+                    ? "高优先级"
+                    : item.priority === "low"
+                      ? "低优先级"
+                      : "中优先级";
                 const selected = item.id === assignment.id;
                 return (
                   <button
                     aria-pressed={selected}
-                    className={`rounded-2xl border p-5 text-left transition focus:ring-4 focus:ring-violet-500/10 focus:outline-none ${
+                    className={`flex min-h-44 flex-col rounded-2xl border p-5 text-left transition focus:ring-4 focus:ring-violet-500/10 focus:outline-none ${
                       selected
                         ? "border-violet-300 bg-violet-50 shadow-[0_10px_28px_rgba(91,85,223,0.10)]"
                         : "border-slate-200 bg-white hover:border-violet-200"
@@ -2312,20 +2332,54 @@ export function PacePalApp() {
                     onClick={() => selectAssignment(item.id, "tasks")}
                     type="button"
                   >
-                    <span className="block text-lg font-semibold text-slate-950">
-                      {item.title}
+                    <span className="flex w-full flex-wrap items-start justify-between gap-2">
+                      <span className="min-w-0 flex-1 text-lg font-semibold text-slate-950">
+                        {item.title}
+                      </span>
+                      <span
+                        className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          item.priority === "high"
+                            ? "bg-rose-50 text-rose-700"
+                            : item.priority === "low"
+                              ? "bg-slate-100 text-slate-600"
+                              : "bg-violet-100 text-violet-700"
+                        }`}
+                      >
+                        {priorityLabel}
+                      </span>
                     </span>
-                    <span className="mt-3 flex items-center justify-between gap-3 text-sm font-semibold text-slate-500">
+                    <span className="mt-2 line-clamp-2 text-sm font-medium text-slate-500">
+                      {item.deliverable}
+                    </span>
+                    <span className="mt-auto flex w-full items-center justify-between gap-3 pt-5 text-sm font-semibold text-slate-500">
                       <span>截止 {formatDate(item.deadline)}</span>
                       <span>
                         {done}/{item.subtasks.length}
+                      </span>
+                    </span>
+                    <span className="mt-3 flex w-full items-center gap-3">
+                      <span
+                        aria-label={`${item.title}完成进度`}
+                        aria-valuemax={100}
+                        aria-valuemin={0}
+                        aria-valuenow={progress}
+                        className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200/70"
+                        role="progressbar"
+                      >
+                        <span
+                          className="block h-full rounded-full bg-[#5b55df] transition-[width]"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </span>
+                      <span className="w-9 text-right text-xs font-semibold text-slate-500">
+                        {progress}%
                       </span>
                     </span>
                   </button>
                 );
               })}
               <button
-                className="flex min-h-28 items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-white p-5 font-semibold text-violet-700 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
+                className="flex min-h-44 items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-white p-5 font-semibold text-violet-700 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
                 onClick={openCreate}
                 type="button"
               >
