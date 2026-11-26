@@ -2593,25 +2593,23 @@ export function PacePalApp() {
                     ? "AI任务调整"
                     : "开始 AI 拆解"}
                 </button>
-                {assignment.subtasks.length > 0 ? (
-                  <button
-                    aria-controls="manual-task-editor"
-                    aria-expanded={taskAdjustmentMode === "manual"}
-                    className={
-                      taskAdjustmentMode === "manual"
-                        ? primaryButtonClassName
-                        : secondaryButtonClassName
-                    }
-                    onClick={() =>
-                      setTaskAdjustmentMode((mode) =>
-                        mode === "manual" ? null : "manual",
-                      )
-                    }
-                    type="button"
-                  >
-                    手动任务调整
-                  </button>
-                ) : null}
+                <button
+                  aria-controls="manual-task-editor"
+                  aria-expanded={taskAdjustmentMode === "manual"}
+                  className={
+                    taskAdjustmentMode === "manual"
+                      ? primaryButtonClassName
+                      : secondaryButtonClassName
+                  }
+                  onClick={() =>
+                    setTaskAdjustmentMode((mode) =>
+                      mode === "manual" ? null : "manual",
+                    )
+                  }
+                  type="button"
+                >
+                  手动任务调整
+                </button>
               </div>
             </div>
             <div
@@ -2629,7 +2627,40 @@ export function PacePalApp() {
                     : undefined
                 }
               >
-                {assignment.subtasks.length === 0 ? (
+                {assignment.subtasks.length === 0 &&
+                taskAdjustmentMode === "manual" ? (
+                  <li className="flex min-h-72 flex-col items-center justify-center px-6 py-12 text-center sm:px-10">
+                    <div className="flex size-12 items-center justify-center rounded-2xl bg-violet-100 text-violet-700">
+                      <svg
+                        aria-hidden="true"
+                        className="size-6"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M12 5v14M5 12h14"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeWidth="1.8"
+                        />
+                      </svg>
+                    </div>
+                    <h2 className="mt-5 text-xl font-semibold text-slate-950">
+                      手动添加详细任务
+                    </h2>
+                    <p className="mt-2 max-w-md leading-7 text-slate-500">
+                      从第一个可执行步骤开始，之后可以继续添加、调整顺序，或再让
+                      AI 补充计划。
+                    </p>
+                    <button
+                      className={`${primaryButtonClassName} mt-6`}
+                      onClick={addManualSubtask}
+                      type="button"
+                    >
+                      添加第一个详细任务
+                    </button>
+                  </li>
+                ) : assignment.subtasks.length === 0 ? (
                   <li className="flex min-h-72 flex-col items-center justify-center px-6 py-12 text-center sm:px-10">
                     <div className="flex size-12 items-center justify-center rounded-2xl bg-violet-100 text-violet-700">
                       <svg
@@ -2724,7 +2755,8 @@ export function PacePalApp() {
                     </li>
                   ))
                 )}
-                {taskAdjustmentMode === "manual" ? (
+                {taskAdjustmentMode === "manual" &&
+                assignment.subtasks.length > 0 ? (
                   <li className="p-4 sm:p-5">
                     <button
                       className="flex min-h-12 w-full items-center justify-center rounded-xl border border-dashed border-violet-300 font-semibold text-violet-700 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"

@@ -456,6 +456,39 @@ test("keeps multiple assignments and lets the user switch between them", async (
   await expect(page.getByText("还没有任务拆解")).toBeVisible();
 });
 
+test("lets the user manually create detailed tasks before chatting with AI", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
+
+  await page.getByRole("button", { name: "创建项目" }).click();
+  await page.getByLabel("项目名称").fill("手动规划项目");
+  const deadline = new Date();
+  deadline.setDate(deadline.getDate() + 7);
+  await page
+    .getByLabel("截止时间")
+    .fill(
+      `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`,
+    );
+  await page.getByRole("button", { name: "创建项目" }).click();
+
+  await expect(
+    page.getByRole("button", { name: "手动任务调整" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "手动任务调整" }).click();
+  await expect(
+    page.getByRole("heading", { name: "手动添加详细任务" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "添加第一个详细任务" }).click();
+  await expect(page.getByLabel("任务名称 1")).toHaveValue("新子任务");
+  await page.getByLabel("任务名称 1").fill("明确项目范围");
+  await page.getByRole("button", { name: "添加子任务" }).click();
+  await expect(page.getByLabel("任务名称 1")).toHaveValue("明确项目范围");
+  await expect(page.getByLabel("任务名称 2")).toHaveValue("新子任务");
+});
+
 test("reports the configured production model", async ({ request }) => {
   const response = await request.get("/api/health");
 
