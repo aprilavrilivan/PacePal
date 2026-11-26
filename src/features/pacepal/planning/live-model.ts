@@ -80,6 +80,26 @@ function withoutTaskNoOps(
     : { ...decision, operations };
 }
 
+function explicitlyRequestsRebuild(message: string) {
+  return /(?:完全|整体|全部).{0,20}(?:换一种|重新|重建|重做|重新安排)|(?:重新|重建|重做).{0,20}(?:计划|规划|后续|剩余)|(?:rebuild|replace|redo|start over).{0,30}(?:plan|remaining work)/i.test(
+    message,
+  );
+}
+
+function normalizeRefinementDecision(
+  decision: RefinementDecision,
+  assignment: Assignment,
+  message: string,
+) {
+  const normalized = withoutTaskNoOps(decision, assignment);
+  const destructive = normalized.operations.some((operation) =>
+    ["delete_task", "merge_tasks"].includes(operation.type),
+  );
+  return destructive && explicitlyRequestsRebuild(message)
+    ? { ...normalized, confirmation: "confirmed" as const }
+    : normalized;
+}
+
 function decisionValidationError(
   decision: RefinementDecision,
   assignment: Assignment,
@@ -216,7 +236,11 @@ export async function generateLiveRefinement(
       });
       return {
         usage: response.usage,
-        value: withoutTaskNoOps(response.output, assignment),
+        value: normalizeRefinementDecision(
+          response.output,
+          assignment,
+          message,
+        ),
       };
     },
     validate: (value) => decisionValidationError(value, assignment),
