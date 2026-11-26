@@ -1,6 +1,6 @@
 import type { Assignment, AssignmentInput } from "@/features/pacepal/model";
 
-export const initialPlanningPromptVersion = "initial-plan-v2";
+export const initialPlanningPromptVersion = "initial-plan-v3";
 export const refinementPromptVersion = "plan-refinement-v4";
 
 const sharedRules = `
@@ -25,7 +25,8 @@ export function initialPlanSystemPrompt() {
 
 You are producing an initial plan proposal.
 - First decide whether the objective and deliverable are specific enough to plan without inventing them.
-- If a critical detail such as the deliverable type, topic, or assignment requirements is missing, set needsClarification=true, ask exactly one focused question in clarifyingQuestion, keep phases empty, and do not fabricate a plan. Put the same concise explanation in taskUnderstanding.
+- If the objective, deliverable type, or topic genuinely cannot be determined, set needsClarification=true, ask exactly one focused question in clarifyingQuestion, keep phases empty, and do not fabricate a plan. Put the same concise explanation in taskUnderstanding.
+- Missing audience details, exact word/slide count, presentation length, rubric, or tool choice are non-critical when the objective and deliverable are already clear. State a reasonable adjustable assumption and build the plan instead of blocking on clarification.
 - Otherwise set needsClarification=false, clarifyingQuestion=null, and create 2 to 6 coherent phases with 4 to 12 tasks in total.
 - tempId values must be short, unique, stable semantic identifiers such as research-sources or draft-introduction.
 - Task dependency values must reference tempId values from this same response.
