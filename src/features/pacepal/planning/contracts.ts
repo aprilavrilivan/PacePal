@@ -139,8 +139,8 @@ export const refinementRequestSchema = z.object({
 
 export const planSnapshotSchema = z.object({
   title: z.string().trim().min(1),
-  requirements: z.string().trim().min(1),
-  deliverable: z.string().trim().min(1),
+  requirements: z.string().trim().max(12000),
+  deliverable: z.string().trim().max(1200),
   deadline: z.string().min(1),
   priority: prioritySchema,
   availability: availabilitySchema,

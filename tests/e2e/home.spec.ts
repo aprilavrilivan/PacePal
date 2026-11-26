@@ -143,7 +143,7 @@ async function mockPlanningApi(page: Page) {
   });
 }
 
-test("creates, approves, schedules, and persists an assignment", async ({
+test("creates a project shell, generates its first breakdown in chat, and persists it", async ({
   page,
 }) => {
   await mockPlanningApi(page);
@@ -158,15 +158,22 @@ test("creates, approves, schedules, and persists an assignment", async ({
     page.getByRole("button", { exact: true, name: "任务" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "创建第一个任务" }),
+    page.getByRole("heading", { name: "创建第一个项目" }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "创建任务" }).click();
-  await page.getByLabel("任务名称").fill("媒介研究课程论文");
-  await page
-    .getByLabel("任务要求")
-    .fill("分析一个媒介现象，使用至少五个学术来源。");
-  await page.getByLabel("成果形式").fill("2500 字课程论文");
+  await page.getByRole("button", { name: "创建项目" }).click();
+  await expect(page.getByLabel("项目名称")).toBeVisible();
+  await expect(page.getByLabel("任务要求")).toHaveCount(0);
+  await expect(page.getByLabel("成果形式")).toHaveCount(0);
+  await expect(page.getByLabel("优先级")).toHaveCount(0);
+  await page.getByLabel("项目名称").fill("尚未保存的项目");
+  await page.getByRole("button", { name: "返回任务页" }).click();
+  await expect(
+    page.getByRole("heading", { name: "开始新的任务计划" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "创建项目" }).click();
+  await page.getByLabel("项目名称").fill("媒介研究课程论文");
 
   const deadline = new Date();
   deadline.setDate(deadline.getDate() + 10);
@@ -176,15 +183,38 @@ test("creates, approves, schedules, and persists an assignment", async ({
   ).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`;
 
   await page.getByLabel("截止时间").fill(localDeadline);
-  await page.getByRole("button", { name: "保存并生成任务" }).click();
+  await page.getByRole("button", { name: "创建项目" }).click();
 
   await expect(
-    page.getByRole("heading", { name: "确认任务计划" }),
+    page.getByRole("heading", { exact: true, name: "任务" }),
   ).toBeVisible();
+  await expect(page.getByText("还没有任务拆解")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "理解任务要求" }),
+    page.getByRole("heading", { name: "任务拆解将在对话后生成" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "确认任务计划" }).click();
+  await expect(page.getByRole("heading", { name: "确认任务计划" })).toHaveCount(
+    0,
+  );
+  const priority = page.getByLabel("媒介研究课程论文优先级");
+  await expect(priority).toHaveValue("medium");
+  await priority.selectOption("high");
+  await expect(priority).toHaveValue("high");
+  await priority.selectOption("medium");
+
+  await page
+    .getByLabel("给 AI 助手的消息")
+    .fill("完成一篇 2500 字课程论文，分析一个媒介现象并使用至少五个学术来源。");
+  await page.getByRole("button", { name: "发送" }).click();
+  const initialAssistantPanel = page.getByRole("complementary", {
+    name: "AI 对话调整",
+  });
+  await expect(
+    initialAssistantPanel.getByText("我已理解任务要求，并按依赖关系生成计划。"),
+  ).toBeVisible();
+  await expect(page.getByText("还没有任务拆解")).toHaveCount(0);
+  await expect(page.getByText("理解任务要求", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { exact: true, name: "概览" }).click();
 
   await expect(page.getByRole("heading", { name: "当前推荐" })).toBeVisible();
   await expect(
@@ -292,7 +322,7 @@ test("creates, approves, schedules, and persists an assignment", async ({
   await expect(
     page.getByRole("progressbar", { name: "媒介研究课程论文完成进度" }),
   ).toBeVisible();
-  await expect(page.getByText("中优先级", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("媒介研究课程论文优先级")).toHaveValue("medium");
   const assistantPanel = page.getByRole("complementary", {
     name: "AI 对话调整",
   });
@@ -401,33 +431,29 @@ test("keeps multiple assignments and lets the user switch between them", async (
 
   async function createAssignment(title: string, daysFromNow: number) {
     await page
-      .getByRole("button", { name: /创建任务|新建任务/ })
+      .getByRole("button", { name: /创建项目|新建项目/ })
       .first()
       .click();
-    await page.getByLabel("任务名称").fill(title);
-    await page.getByLabel("任务要求").fill("完成资料整理、初稿和复核。 ");
-    await page.getByLabel("成果形式").fill("课程报告");
+    await page.getByLabel("项目名称").fill(title);
     const deadline = new Date();
     deadline.setDate(deadline.getDate() + daysFromNow);
     const value = `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`;
     await page.getByLabel("截止时间").fill(value);
-    await page.getByRole("button", { name: "保存并生成任务" }).click();
-    await page.getByRole("button", { name: "确认任务计划" }).click();
+    await page.getByRole("button", { name: "创建项目" }).click();
   }
 
   await createAssignment("课程论文", 10);
   await createAssignment("项目汇报", 5);
 
-  await expect(page.getByRole("heading", { name: "当前推荐" })).toBeVisible();
-  await page.getByRole("button", { exact: true, name: "任务" }).click();
+  await expect(
+    page.getByRole("heading", { exact: true, name: "任务" }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: /课程论文/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /项目汇报/ })).toBeVisible();
   await page.getByRole("button", { name: /课程论文/ }).click();
   await expect(page.getByText("课程论文").first()).toBeVisible();
 
-  await page.getByRole("button", { name: "日历" }).click();
-  await expect(page.getByText("课程论文").first()).toBeVisible();
-  await expect(page.getByText("项目汇报").first()).toBeVisible();
+  await expect(page.getByText("还没有任务拆解")).toBeVisible();
 });
 
 test("reports the configured production model", async ({ request }) => {
@@ -460,10 +486,8 @@ test("shows model unavailable without creating a fallback plan", async ({
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
 
-  await page.getByRole("button", { name: "创建任务" }).click();
-  await page.getByLabel("任务名称").fill("课程论文");
-  await page.getByLabel("任务要求").fill("完成资料整理、初稿和复核。");
-  await page.getByLabel("成果形式").fill("课程报告");
+  await page.getByRole("button", { name: "创建项目" }).click();
+  await page.getByLabel("项目名称").fill("课程论文");
   const deadline = new Date();
   deadline.setDate(deadline.getDate() + 7);
   await page
@@ -471,14 +495,17 @@ test("shows model unavailable without creating a fallback plan", async ({
     .fill(
       `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`,
     );
-  await page.getByRole("button", { name: "保存并生成任务" }).click();
+  await page.getByRole("button", { name: "创建项目" }).click();
+  await page
+    .getByLabel("给 AI 助手的消息")
+    .fill("完成一篇课程报告，需要资料整理、初稿和复核。");
+  await page.getByRole("button", { name: "发送" }).click();
 
   await expect(
-    page.getByText("当前 AI 模型不可用，请稍后重试。"),
+    page.getByText("当前 AI 模型不可用，请稍后重试。 你的计划没有变化。"),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "确认任务计划" })).toHaveCount(
-    0,
-  );
+  await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
+  await expect(page.getByText("还没有任务拆解")).toBeVisible();
 });
 
 test("asks one clarification without creating a fabricated plan", async ({
@@ -512,10 +539,8 @@ test("asks one clarification without creating a fabricated plan", async ({
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
 
-  await page.getByRole("button", { name: "创建任务" }).click();
-  await page.getByLabel("任务名称").fill("课程项目");
-  await page.getByLabel("任务要求").fill("下周前完成，但要求还不清楚。");
-  await page.getByLabel("成果形式").fill("尚未确定");
+  await page.getByRole("button", { name: "创建项目" }).click();
+  await page.getByLabel("项目名称").fill("课程项目");
   const deadline = new Date();
   deadline.setDate(deadline.getDate() + 7);
   await page
@@ -523,14 +548,19 @@ test("asks one clarification without creating a fabricated plan", async ({
     .fill(
       `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, "0")}-${String(deadline.getDate()).padStart(2, "0")}T18:00`,
     );
-  await page.getByRole("button", { name: "保存并生成任务" }).click();
+  await page.getByRole("button", { name: "创建项目" }).click();
+  await page
+    .getByLabel("给 AI 助手的消息")
+    .fill("下周前要完成，但目前还不知道具体成果形式。");
+  await page.getByRole("button", { name: "发送" }).click();
 
   await expect(
     page.getByText(
       "这个课程项目最终需要提交什么成果，例如论文、展示还是软件？",
     ),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "确认任务计划" })).toHaveCount(
+  await expect(page.getByText("还没有任务拆解")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "理解任务要求" })).toHaveCount(
     0,
   );
 });

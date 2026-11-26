@@ -1,6 +1,6 @@
 import type { Assignment, AssignmentInput } from "@/features/pacepal/model";
 
-export const initialPlanningPromptVersion = "initial-plan-v3";
+export const initialPlanningPromptVersion = "initial-plan-v4";
 export const refinementPromptVersion = "plan-refinement-v5";
 
 const sharedRules = `
@@ -24,8 +24,10 @@ export function initialPlanSystemPrompt() {
   return `${sharedRules}
 
 You are producing an initial plan proposal.
+- The project shell may contain only a title and deadline. The requirements field can contain a transcript of the planning conversation; treat it as the user's source of truth.
 - First decide whether the objective and deliverable are specific enough to plan without inventing them.
 - If the objective, deliverable type, or topic genuinely cannot be determined, set needsClarification=true, ask exactly one focused question in clarifyingQuestion, keep phases empty, and do not fabricate a plan. Put the same concise explanation in taskUnderstanding.
+- When needsClarification=true, ask for the single missing detail that would most improve the plan. Do not repeat a question the user has already answered in the conversation transcript.
 - Missing audience details, exact word/slide count, presentation length, rubric, or tool choice are non-critical when the objective and deliverable are already clear. State a reasonable adjustable assumption and build the plan instead of blocking on clarification.
 - Otherwise set needsClarification=false, clarifyingQuestion=null, and create 2 to 6 coherent phases with 4 to 12 tasks in total.
 - tempId values must be short, unique, stable semantic identifiers such as research-sources or draft-introduction.

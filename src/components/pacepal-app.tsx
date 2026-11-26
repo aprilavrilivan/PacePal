@@ -183,9 +183,7 @@ function rebuildAssignmentSchedule(
 function validateAssignment(form: AssignmentInput) {
   const errors: FormErrors = {};
 
-  if (!form.title.trim()) errors.title = "请输入任务名称";
-  if (!form.requirements.trim()) errors.requirements = "请输入任务要求";
-  if (!form.deliverable.trim()) errors.deliverable = "请输入成果形式";
+  if (!form.title.trim()) errors.title = "请输入项目名称";
 
   if (!form.deadline) {
     errors.deadline = "请选择截止时间";
@@ -194,6 +192,27 @@ function validateAssignment(form: AssignmentInput) {
   }
 
   return errors;
+}
+
+function initialPlanningRequirements(
+  messages: ChatMessage[],
+  latestUserMessage: string,
+) {
+  const conversation = [
+    ...messages
+      .filter((message) => message.errorCode !== "model_unavailable")
+      .slice(-8)
+      .map((message) => ({
+        role: message.role === "user" ? "用户" : "PacePal",
+        content: message.content.slice(0, 1200),
+      })),
+    { role: "用户", content: latestUserMessage.slice(0, 3000) },
+  ];
+
+  return [
+    "以下是用户为这个项目提供的规划信息：",
+    ...conversation.map(({ role, content }) => `${role}：${content}`),
+  ].join("\n");
 }
 
 export function PacePalApp() {
@@ -209,8 +228,6 @@ export function PacePalApp() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [planError, setPlanError] = useState("");
-  const [planClarification, setPlanClarification] = useState("");
-  const [planBusy, setPlanBusy] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [cloudReady, setCloudReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("local");
@@ -519,6 +536,12 @@ export function PacePalApp() {
     setScreen("create");
   }
 
+  function closeAssignmentForm() {
+    setErrors({});
+    setDashboardView("tasks");
+    setScreen("dashboard");
+  }
+
   function openEditAssignment() {
     if (!assignment) return;
     setFormMode("edit");
@@ -533,97 +556,42 @@ export function PacePalApp() {
     setScreen("create");
   }
 
-  async function handleAssignmentSubmit(event: FormEvent<HTMLFormElement>) {
+  function handleAssignmentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextErrors = validateAssignment(form);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
     setPlanError("");
-    setPlanClarification("");
 
     if (formMode === "edit" && assignment) {
-      const planningFieldsChanged =
-        form.title !== assignment.title ||
-        form.requirements !== assignment.requirements ||
-        form.deliverable !== assignment.deliverable;
-      const candidate = { ...assignment, ...form };
-      setPlanBusy(true);
-
-      if (planningFieldsChanged) {
-        try {
-          const response = await requestRefinement(
-            candidate,
-            "任务名称、要求或成果形式已经修改。请重新理解目标，只调整尚未完成的任务，保留已完成工作，并重新安排后续计划。",
-          );
-          updateAssignment((current) => {
-            const edited = { ...current, ...form };
-            const refined = response.changed
-              ? mergeValidatedPlan(edited, response)
-              : edited;
-            return rebuildAssignmentSchedule(
-              refined,
-              response.changed
-                ? "任务信息与后续任务已更新"
-                : "任务信息已更新，安排已重算",
-            );
-          });
-        } catch {
-          updateAssignment((current) =>
-            rebuildAssignmentSchedule(
-              { ...current, ...form },
-              "任务信息已更新；当前 AI 模型不可用，原任务已保留",
-            ),
-          );
-        }
-      } else {
-        updateAssignment((current) =>
-          rebuildAssignmentSchedule(
-            { ...current, ...form },
-            "截止时间或优先级已更新，安排已重算",
-          ),
-        );
-      }
-
-      setPlanBusy(false);
-      setScreen(assignment.status === "scheduled" ? "dashboard" : "plan");
-      return;
-    }
-
-    setPlanBusy(true);
-    let plan: Awaited<ReturnType<typeof requestPlan>>;
-    try {
-      plan = await requestPlan(form);
-    } catch (error) {
-      setPlanError(
-        error instanceof Error ? error.message : "暂时无法生成计划，请稍后重试",
+      updateAssignment((current) =>
+        rebuildAssignmentSchedule(
+          {
+            ...current,
+            title: form.title.trim(),
+            deadline: form.deadline,
+          },
+          "项目信息已更新，安排已重算",
+        ),
       );
-      setPlanBusy(false);
-      return;
-    }
-    setPlanBusy(false);
-
-    if (plan.needsClarification) {
-      setPlanClarification(plan.assistantMessage);
+      setDashboardView("tasks");
+      setScreen("dashboard");
       return;
     }
 
     const nextAssignment: Assignment = {
       ...form,
+      title: form.title.trim(),
       id: createId("assignment"),
       createdAt: new Date().toISOString(),
-      status: "planning",
-      subtasks: plan.subtasks,
+      status: "scheduled",
+      subtasks: [],
       availability: { dailyMinutes: 240, preferredTime: "09:00" },
       schedule: [],
       unscheduledMinutes: 0,
       checkIn: { availableMinutes: 30, energy: "medium" },
       scheduleNotice: "",
       chatMessages: [],
-      language: plan.language,
-      planVersion: plan.planVersion,
-      planHistory: plan.planHistory,
-      planningSummary: plan.assistantMessage,
-      planningAssumptions: plan.assumptions,
     };
 
     setAppState((current) => ({
@@ -633,7 +601,22 @@ export function PacePalApp() {
       version: 2,
     }));
     setEditingTaskId(null);
-    setScreen("plan");
+    setTaskAdjustmentMode("ai");
+    setDashboardView("tasks");
+    setScreen("dashboard");
+  }
+
+  function updateAssignmentPriority(
+    assignmentId: string,
+    priority: AssignmentInput["priority"],
+  ) {
+    updateAssignment(
+      (current) => ({
+        ...current,
+        priority,
+      }),
+      assignmentId,
+    );
   }
 
   function updateSubtask(id: string, patch: Partial<Subtask>) {
@@ -1178,6 +1161,55 @@ export function PacePalApp() {
     }));
 
     try {
+      if (assignment.subtasks.length === 0) {
+        const requirements = initialPlanningRequirements(
+          previousMessages,
+          message,
+        );
+        const response = await requestPlan({
+          title: assignment.title,
+          requirements,
+          deliverable: assignment.deliverable,
+          deadline: assignment.deadline,
+          priority: assignment.priority,
+        });
+        const assistantMessage: ChatMessage = {
+          content: response.assistantMessage,
+          createdAt: new Date().toISOString(),
+          id: createId("message"),
+          role: "assistant",
+        };
+
+        updateAssignment((current) => {
+          if (response.needsClarification) {
+            return {
+              ...current,
+              language: response.language,
+              chatMessages: [...current.chatMessages, assistantMessage],
+            };
+          }
+
+          const planned = rebuildAssignmentSchedule(
+            {
+              ...current,
+              requirements,
+              subtasks: response.subtasks,
+              language: response.language,
+              planVersion: response.planVersion,
+              planHistory: response.planHistory,
+              planningSummary: response.assistantMessage,
+              planningAssumptions: response.assumptions,
+            },
+            "AI 已生成初步任务拆解",
+          );
+          return {
+            ...planned,
+            chatMessages: [...planned.chatMessages, assistantMessage],
+          };
+        });
+        return;
+      }
+
       const response = await requestRefinement(
         {
           ...assignment,
@@ -1411,27 +1443,39 @@ export function PacePalApp() {
       <AppFrame {...appFrameProps}>
         <div className="mx-auto w-full max-w-2xl py-10 sm:py-16">
           <button
-            className={textButtonClassName}
-            onClick={() =>
-              setScreen(
-                formMode === "edit" && assignment?.status === "planning"
-                  ? "plan"
-                  : "dashboard",
-              )
-            }
+            className={secondaryButtonClassName}
+            onClick={closeAssignmentForm}
             type="button"
           >
-            返回
+            <svg
+              aria-hidden="true"
+              className="mr-2 size-4"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <path
+                d="m15 18-6-6 6-6"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+              />
+            </svg>
+            返回任务页
           </button>
           <h1 className="mt-6 text-3xl font-semibold tracking-[-0.03em] text-slate-950">
-            {formMode === "create" ? "创建任务" : "编辑任务"}
+            {formMode === "create" ? "创建项目" : "编辑项目"}
           </h1>
+          <p className="mt-3 leading-7 text-slate-600">
+            先保存项目名称和截止时间。详细要求与任务拆解将在 AI
+            对话中逐步生成和更新。
+          </p>
 
           <form
             className={`${surfaceClassName} mt-8 space-y-6 p-5 sm:p-8`}
             onSubmit={handleAssignmentSubmit}
           >
-            <FormField label="任务名称" error={errors.title}>
+            <FormField label="项目名称" error={errors.title}>
               <input
                 className={fieldClassName}
                 id="title"
@@ -1445,98 +1489,31 @@ export function PacePalApp() {
               />
             </FormField>
 
-            <FormField label="任务要求" error={errors.requirements}>
-              <textarea
-                className={`${fieldClassName} min-h-32 resize-y`}
-                id="requirements"
-                value={form.requirements}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    requirements: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-
-            <FormField label="成果形式" error={errors.deliverable}>
+            <FormField label="截止时间" error={errors.deadline}>
               <input
                 className={fieldClassName}
-                id="deliverable"
-                placeholder="例如：2500 字课程论文"
-                value={form.deliverable}
+                id="deadline"
+                type="datetime-local"
+                value={form.deadline}
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    deliverable: event.target.value,
+                    deadline: event.target.value,
                   }))
                 }
               />
             </FormField>
 
-            <div className="grid gap-6 sm:grid-cols-2">
-              <FormField label="截止时间" error={errors.deadline}>
-                <input
-                  className={fieldClassName}
-                  id="deadline"
-                  type="datetime-local"
-                  value={form.deadline}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      deadline: event.target.value,
-                    }))
-                  }
-                />
-              </FormField>
-
-              <FormField label="优先级">
-                <select
-                  className={fieldClassName}
-                  id="priority"
-                  value={form.priority}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      priority: event.target
-                        .value as AssignmentInput["priority"],
-                    }))
-                  }
-                >
-                  <option value="low">低</option>
-                  <option value="medium">中</option>
-                  <option value="high">高</option>
-                </select>
-              </FormField>
-            </div>
-
-            {planError ? (
-              <p className="text-sm font-medium text-red-700" role="alert">
-                {planError}
-              </p>
-            ) : null}
-            {planClarification ? (
-              <p
-                className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900"
-                role="status"
-              >
-                {planClarification}
-              </p>
-            ) : null}
-
-            <div className="flex justify-end pt-2">
+            <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
               <button
-                className={primaryButtonClassName}
-                disabled={planBusy}
-                type="submit"
+                className={secondaryButtonClassName}
+                onClick={closeAssignmentForm}
+                type="button"
               >
-                {planBusy
-                  ? formMode === "create"
-                    ? "正在生成"
-                    : "正在更新"
-                  : formMode === "create"
-                    ? "保存并生成任务"
-                    : "保存"}
+                取消
+              </button>
+              <button className={primaryButtonClassName} type="submit">
+                {formMode === "create" ? "创建项目" : "保存"}
               </button>
             </div>
           </form>
@@ -1748,7 +1725,7 @@ export function PacePalApp() {
                 </div>
                 <div>
                   <h2 className="text-2xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-3xl">
-                    创建第一个任务
+                    创建第一个项目
                   </h2>
                   <div className="mt-6 flex flex-wrap gap-2">
                     {["任务拆解", "每日安排", "动态调整"].map((label) => (
@@ -1765,7 +1742,7 @@ export function PacePalApp() {
                     onClick={openCreate}
                     type="button"
                   >
-                    创建任务
+                    创建项目
                   </button>
                 </div>
               </div>
@@ -1950,7 +1927,7 @@ export function PacePalApp() {
                 onClick={openCreate}
                 type="button"
               >
-                新建任务
+                新建项目
               </button>
             ) : null}
           </div>
@@ -2509,69 +2486,77 @@ export function PacePalApp() {
                 const progress = item.subtasks.length
                   ? Math.round((done / item.subtasks.length) * 100)
                   : 0;
-                const priorityLabel =
-                  item.priority === "high"
-                    ? "高优先级"
-                    : item.priority === "low"
-                      ? "低优先级"
-                      : "中优先级";
                 const selected = item.id === assignment.id;
                 return (
-                  <button
-                    aria-pressed={selected}
-                    className={`flex min-h-44 flex-col rounded-2xl border p-5 text-left transition focus:ring-4 focus:ring-violet-500/10 focus:outline-none ${
+                  <article
+                    className={`relative min-h-44 overflow-hidden rounded-2xl border transition ${
                       selected
                         ? "border-violet-300 bg-violet-50 shadow-[0_10px_28px_rgba(91,85,223,0.10)]"
                         : "border-slate-200 bg-white hover:border-violet-200"
                     }`}
                     key={item.id}
-                    onClick={() => selectAssignment(item.id, "tasks")}
-                    type="button"
                   >
-                    <span className="flex w-full flex-wrap items-start justify-between gap-2">
-                      <span className="min-w-0 flex-1 text-lg font-semibold text-slate-950">
+                    <button
+                      aria-pressed={selected}
+                      className="flex min-h-44 w-full flex-col p-5 text-left focus:ring-4 focus:ring-violet-500/10 focus:outline-none focus:ring-inset"
+                      onClick={() => selectAssignment(item.id, "tasks")}
+                      type="button"
+                    >
+                      <span className="pr-28 text-lg font-semibold text-slate-950">
                         {item.title}
                       </span>
-                      <span
-                        className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          item.priority === "high"
-                            ? "bg-rose-50 text-rose-700"
-                            : item.priority === "low"
-                              ? "bg-slate-100 text-slate-600"
-                              : "bg-violet-100 text-violet-700"
-                        }`}
-                      >
-                        {priorityLabel}
+                      <span className="mt-2 line-clamp-2 text-sm font-medium text-slate-500">
+                        {item.deliverable ||
+                          (item.subtasks.length > 0
+                            ? item.planningSummary
+                            : "等待与 AI 对话后生成任务拆解")}
                       </span>
-                    </span>
-                    <span className="mt-2 line-clamp-2 text-sm font-medium text-slate-500">
-                      {item.deliverable}
-                    </span>
-                    <span className="mt-auto flex w-full items-center justify-between gap-3 pt-5 text-sm font-semibold text-slate-500">
-                      <span>截止 {formatDate(item.deadline)}</span>
-                      <span>
-                        {done}/{item.subtasks.length}
+                      <span className="mt-auto flex w-full items-center justify-between gap-3 pt-5 text-sm font-semibold text-slate-500">
+                        <span>截止 {formatDate(item.deadline)}</span>
+                        <span>
+                          {item.subtasks.length > 0
+                            ? `${done}/${item.subtasks.length}`
+                            : "待拆解"}
+                        </span>
                       </span>
-                    </span>
-                    <span className="mt-3 flex w-full items-center gap-3">
-                      <span
-                        aria-label={`${item.title}完成进度`}
-                        aria-valuemax={100}
-                        aria-valuemin={0}
-                        aria-valuenow={progress}
-                        className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200/70"
-                        role="progressbar"
-                      >
+                      <span className="mt-3 flex w-full items-center gap-3">
                         <span
-                          className="block h-full rounded-full bg-[#5b55df] transition-[width]"
-                          style={{ width: `${progress}%` }}
-                        />
+                          aria-label={`${item.title}完成进度`}
+                          aria-valuemax={100}
+                          aria-valuemin={0}
+                          aria-valuenow={progress}
+                          className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200/70"
+                          role="progressbar"
+                        >
+                          <span
+                            className="block h-full rounded-full bg-[#5b55df] transition-[width]"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </span>
+                        <span className="w-9 text-right text-xs font-semibold text-slate-500">
+                          {progress}%
+                        </span>
                       </span>
-                      <span className="w-9 text-right text-xs font-semibold text-slate-500">
-                        {progress}%
-                      </span>
-                    </span>
-                  </button>
+                    </button>
+                    <label className="absolute top-4 right-4">
+                      <span className="sr-only">{item.title}优先级</span>
+                      <select
+                        aria-label={`${item.title}优先级`}
+                        className="min-h-9 rounded-lg border border-slate-200 bg-white py-1.5 pr-8 pl-3 text-sm font-semibold text-slate-700 shadow-sm transition outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10"
+                        onChange={(event) =>
+                          updateAssignmentPriority(
+                            item.id,
+                            event.target.value as AssignmentInput["priority"],
+                          )
+                        }
+                        value={item.priority}
+                      >
+                        <option value="low">低优先级</option>
+                        <option value="medium">中优先级</option>
+                        <option value="high">高优先级</option>
+                      </select>
+                    </label>
+                  </article>
                 );
               })}
               <button
@@ -2579,12 +2564,14 @@ export function PacePalApp() {
                 onClick={openCreate}
                 type="button"
               >
-                ＋ 新建任务
+                ＋ 新建项目
               </button>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-4">
               <p className="mt-8 font-medium text-slate-500">
-                {remainingMinutes} 分钟待完成
+                {assignment.subtasks.length > 0
+                  ? `${remainingMinutes} 分钟待完成`
+                  : "还没有任务拆解"}
               </p>
               <div className="mt-8 flex flex-wrap gap-2">
                 <button
@@ -2602,25 +2589,29 @@ export function PacePalApp() {
                   }
                   type="button"
                 >
-                  AI任务调整
+                  {assignment.subtasks.length > 0
+                    ? "AI任务调整"
+                    : "开始 AI 拆解"}
                 </button>
-                <button
-                  aria-controls="manual-task-editor"
-                  aria-expanded={taskAdjustmentMode === "manual"}
-                  className={
-                    taskAdjustmentMode === "manual"
-                      ? primaryButtonClassName
-                      : secondaryButtonClassName
-                  }
-                  onClick={() =>
-                    setTaskAdjustmentMode((mode) =>
-                      mode === "manual" ? null : "manual",
-                    )
-                  }
-                  type="button"
-                >
-                  手动任务调整
-                </button>
+                {assignment.subtasks.length > 0 ? (
+                  <button
+                    aria-controls="manual-task-editor"
+                    aria-expanded={taskAdjustmentMode === "manual"}
+                    className={
+                      taskAdjustmentMode === "manual"
+                        ? primaryButtonClassName
+                        : secondaryButtonClassName
+                    }
+                    onClick={() =>
+                      setTaskAdjustmentMode((mode) =>
+                        mode === "manual" ? null : "manual",
+                      )
+                    }
+                    type="button"
+                  >
+                    手动任务调整
+                  </button>
+                ) : null}
               </div>
             </div>
             <div
@@ -2638,73 +2629,101 @@ export function PacePalApp() {
                     : undefined
                 }
               >
-                {taskAdjustmentMode === "manual"
-                  ? assignment.subtasks.map((subtask, index) => (
-                      <ManualSubtaskRow
-                        canDelete={assignment.subtasks.length > 1}
-                        index={index}
-                        key={subtask.id}
-                        onChange={(patch) =>
-                          updateManualSubtask(subtask.id, patch)
-                        }
-                        onDelete={() => deleteManualSubtask(subtask.id)}
-                        onDragEnd={() => {
-                          draggedTaskIdRef.current = null;
-                        }}
-                        onDragStart={() => {
-                          draggedTaskIdRef.current = subtask.id;
-                        }}
-                        onDrop={(sourceId) => {
-                          const resolvedSourceId =
-                            sourceId || draggedTaskIdRef.current;
-                          draggedTaskIdRef.current = null;
-                          if (resolvedSourceId) {
-                            reorderManualSubtasks(resolvedSourceId, subtask.id);
-                          }
-                        }}
-                        onToggleCompleted={() => toggleCompleted(subtask.id)}
-                        subtask={subtask}
-                      />
-                    ))
-                  : assignment.subtasks.map((subtask) => (
-                      <li
-                        className="flex items-start gap-4 px-5 py-4 sm:px-6"
-                        key={subtask.id}
+                {assignment.subtasks.length === 0 ? (
+                  <li className="flex min-h-72 flex-col items-center justify-center px-6 py-12 text-center sm:px-10">
+                    <div className="flex size-12 items-center justify-center rounded-2xl bg-violet-100 text-violet-700">
+                      <svg
+                        aria-hidden="true"
+                        className="size-6"
+                        fill="none"
+                        viewBox="0 0 24 24"
                       >
-                        <input
-                          aria-label={`完成 ${subtask.title}`}
-                          checked={subtask.status === "completed"}
-                          className="mt-0.5 size-5 rounded border-slate-300 accent-violet-600"
-                          onChange={() => toggleCompleted(subtask.id)}
-                          type="checkbox"
+                        <path
+                          d="M8 7h8M8 12h5m-5 5h8M5 4h14v16H5z"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.8"
                         />
-                        <div className="min-w-0 flex-1">
-                          <span
-                            className={`font-semibold ${
-                              subtask.status === "completed"
-                                ? "text-slate-400 line-through"
-                                : "text-slate-900"
-                            }`}
-                          >
-                            {subtask.title}
-                          </span>
-                          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-sm font-medium text-slate-500">
-                            <span>{statusLabels[subtask.status]}</span>
-                            <span>计划 {subtask.estimatedMinutes} 分钟</span>
-                            <span>实际 {subtask.actualMinutes} 分钟</span>
-                          </div>
-                          {subtask.status === "blocked" ? (
-                            <button
-                              className={`${textButtonClassName} mt-2 -ml-2.5`}
-                              onClick={() => splitBlockedTask(subtask.id)}
-                              type="button"
-                            >
-                              拆小一步
-                            </button>
-                          ) : null}
+                      </svg>
+                    </div>
+                    <h2 className="mt-5 text-xl font-semibold text-slate-950">
+                      任务拆解将在对话后生成
+                    </h2>
+                    <p className="mt-2 max-w-md leading-7 text-slate-500">
+                      在右侧告诉 PacePal
+                      项目成果、主要要求和已知进度。信息足够时会生成初步拆解，不足时会继续向你提问。
+                    </p>
+                  </li>
+                ) : taskAdjustmentMode === "manual" ? (
+                  assignment.subtasks.map((subtask, index) => (
+                    <ManualSubtaskRow
+                      canDelete={assignment.subtasks.length > 1}
+                      index={index}
+                      key={subtask.id}
+                      onChange={(patch) =>
+                        updateManualSubtask(subtask.id, patch)
+                      }
+                      onDelete={() => deleteManualSubtask(subtask.id)}
+                      onDragEnd={() => {
+                        draggedTaskIdRef.current = null;
+                      }}
+                      onDragStart={() => {
+                        draggedTaskIdRef.current = subtask.id;
+                      }}
+                      onDrop={(sourceId) => {
+                        const resolvedSourceId =
+                          sourceId || draggedTaskIdRef.current;
+                        draggedTaskIdRef.current = null;
+                        if (resolvedSourceId) {
+                          reorderManualSubtasks(resolvedSourceId, subtask.id);
+                        }
+                      }}
+                      onToggleCompleted={() => toggleCompleted(subtask.id)}
+                      subtask={subtask}
+                    />
+                  ))
+                ) : (
+                  assignment.subtasks.map((subtask) => (
+                    <li
+                      className="flex items-start gap-4 px-5 py-4 sm:px-6"
+                      key={subtask.id}
+                    >
+                      <input
+                        aria-label={`完成 ${subtask.title}`}
+                        checked={subtask.status === "completed"}
+                        className="mt-0.5 size-5 rounded border-slate-300 accent-violet-600"
+                        onChange={() => toggleCompleted(subtask.id)}
+                        type="checkbox"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <span
+                          className={`font-semibold ${
+                            subtask.status === "completed"
+                              ? "text-slate-400 line-through"
+                              : "text-slate-900"
+                          }`}
+                        >
+                          {subtask.title}
+                        </span>
+                        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-sm font-medium text-slate-500">
+                          <span>{statusLabels[subtask.status]}</span>
+                          <span>计划 {subtask.estimatedMinutes} 分钟</span>
+                          <span>实际 {subtask.actualMinutes} 分钟</span>
                         </div>
-                      </li>
-                    ))}
+                        {subtask.status === "blocked" ? (
+                          <button
+                            className={`${textButtonClassName} mt-2 -ml-2.5`}
+                            onClick={() => splitBlockedTask(subtask.id)}
+                            type="button"
+                          >
+                            拆小一步
+                          </button>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))
+                )}
                 {taskAdjustmentMode === "manual" ? (
                   <li className="p-4 sm:p-5">
                     <button
@@ -2753,7 +2772,9 @@ export function PacePalApp() {
                   >
                     {assignment.chatMessages.length === 0 ? (
                       <div className="max-w-[88%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 leading-7 text-slate-700 shadow-sm">
-                        告诉我哪里需要调整，我会更新任务和后续安排。
+                        {assignment.subtasks.length === 0
+                          ? "先告诉我这个项目需要交付什么、主要要求和你已经知道的信息。我会生成初步任务拆解；如果信息还不够，我会先问你一个关键问题。"
+                          : "告诉我哪里需要调整，我会更新任务和后续安排。"}
                       </div>
                     ) : null}
                     {assignment.chatMessages.map((message) => (
@@ -2811,23 +2832,25 @@ export function PacePalApp() {
                   </div>
 
                   <div className="border-t border-slate-100 bg-white p-4 sm:p-5">
-                    <div className="mb-3 flex flex-wrap gap-2">
-                      {[
-                        "把当前任务拆小",
-                        "检查并校准任务耗时",
-                        "依据进度和阻塞优化计划",
-                      ].map((prompt) => (
-                        <button
-                          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus:ring-4 focus:ring-violet-500/10 focus:outline-none disabled:opacity-50"
-                          disabled={chatBusy}
-                          key={prompt}
-                          onClick={() => void sendChatMessage(prompt)}
-                          type="button"
-                        >
-                          {prompt}
-                        </button>
-                      ))}
-                    </div>
+                    {assignment.subtasks.length > 0 ? (
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        {[
+                          "把当前任务拆小",
+                          "检查并校准任务耗时",
+                          "依据进度和阻塞优化计划",
+                        ].map((prompt) => (
+                          <button
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus:ring-4 focus:ring-violet-500/10 focus:outline-none disabled:opacity-50"
+                            disabled={chatBusy}
+                            key={prompt}
+                            onClick={() => void sendChatMessage(prompt)}
+                            type="button"
+                          >
+                            {prompt}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                     <form
                       className="flex items-end gap-3"
                       onSubmit={submitChat}
@@ -2840,7 +2863,11 @@ export function PacePalApp() {
                         disabled={chatBusy}
                         id="chat-message"
                         onChange={(event) => setChatDraft(event.target.value)}
-                        placeholder="输入你想调整的内容"
+                        placeholder={
+                          assignment.subtasks.length === 0
+                            ? "说明项目要求、成果形式和已知信息"
+                            : "输入你想调整的内容"
+                        }
                         rows={1}
                         value={chatDraft}
                       />
