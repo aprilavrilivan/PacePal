@@ -1173,48 +1173,111 @@ export function PacePalApp() {
     assignmentId: string,
     subtaskId: string,
     date: string,
+    before?: { assignmentId: string; subtaskId: string },
   ) {
-    updateAssignment((current) => {
-      const block = current.schedule.find(
-        (candidate) => candidate.subtaskId === subtaskId,
-      );
-      if (!block || block.date === date) return current;
-
-      const lastEnd = current.schedule
-        .filter(
-          (candidate) =>
-            candidate.date === date && candidate.subtaskId !== subtaskId,
+    setAppState((current) => {
+      const entries = current.assignments
+        .flatMap((item, assignmentIndex) =>
+          item.schedule.map((block) => ({
+            assignmentId: item.id,
+            assignmentIndex,
+            block,
+          })),
         )
-        .reduce((latest, candidate) => {
-          const [hours, minutes] = candidate.startTime.split(":").map(Number);
-          return Math.max(
-            latest,
-            hours * 60 + minutes + candidate.durationMinutes,
-          );
-        }, 540);
-      const moved = {
-        ...block,
-        date,
-        locked: true,
-        startTime: addMinutesToTime("00:00", lastEnd),
+        .sort(
+          (left, right) =>
+            left.block.date.localeCompare(right.block.date) ||
+            left.block.startTime.localeCompare(right.block.startTime) ||
+            left.assignmentIndex - right.assignmentIndex,
+        );
+      const entryKey = (entry: (typeof entries)[number]) =>
+        `${entry.assignmentId}::${entry.block.subtaskId}`;
+      const movingKey = `${assignmentId}::${subtaskId}`;
+      const moving = entries.find((entry) => entryKey(entry) === movingKey);
+      if (!moving) return current;
+
+      const sourceDate = moving.block.date;
+      const entriesOn = (targetDate: string) =>
+        entries.filter(
+          (entry) =>
+            entry.block.date === targetDate && entryKey(entry) !== movingKey,
+        );
+      const sourceEntries = entriesOn(sourceDate);
+      const targetEntries =
+        sourceDate === date ? sourceEntries : entriesOn(date);
+      const beforeKey = before
+        ? `${before.assignmentId}::${before.subtaskId}`
+        : null;
+      const insertionIndex = beforeKey
+        ? targetEntries.findIndex((entry) => entryKey(entry) === beforeKey)
+        : -1;
+      const targetOrder = [...targetEntries];
+      targetOrder.splice(
+        insertionIndex < 0 ? targetOrder.length : insertionIndex,
+        0,
+        moving,
+      );
+
+      if (
+        sourceDate === date &&
+        entries
+          .filter((entry) => entry.block.date === date)
+          .map(entryKey)
+          .every((key, index) => key === entryKey(targetOrder[index]!))
+      ) {
+        return current;
+      }
+
+      const updates = new Map<string, Assignment["schedule"][number]>();
+      const normalize = (
+        targetDate: string,
+        ordered: typeof targetOrder,
+        startAt: number,
+      ) => {
+        let elapsed = startAt;
+        for (const entry of ordered) {
+          updates.set(`${entry.assignmentId}::${entry.block.id}`, {
+            ...entry.block,
+            date: targetDate,
+            locked: true,
+            startTime: addMinutesToTime("00:00", elapsed),
+          });
+          elapsed += entry.block.durationMinutes;
+        }
       };
+      const firstStart = (ordered: typeof targetOrder) =>
+        ordered.reduce((earliest, entry) => {
+          const [hours, minutes] = entry.block.startTime.split(":").map(Number);
+          return Math.min(earliest, hours * 60 + minutes);
+        }, 540);
+
+      if (sourceDate !== date) {
+        normalize(sourceDate, sourceEntries, firstStart(sourceEntries));
+      }
+      normalize(date, targetOrder, firstStart(targetEntries));
 
       return {
         ...current,
-        schedule: [
-          ...current.schedule.filter(
-            (candidate) => candidate.subtaskId !== subtaskId,
-          ),
-          moved,
-        ].sort(
-          (left, right) =>
-            left.date.localeCompare(right.date) ||
-            left.startTime.localeCompare(right.startTime),
-        ),
-        scheduleNotice: "日历安排已手动调整",
-        scheduleVersion: 2,
+        assignments: current.assignments.map((item) => {
+          const changed = item.schedule.some((block) =>
+            updates.has(`${item.id}::${block.id}`),
+          );
+          if (!changed) return item;
+          return {
+            ...item,
+            schedule: item.schedule
+              .map((block) => updates.get(`${item.id}::${block.id}`) ?? block)
+              .sort(
+                (left, right) =>
+                  left.date.localeCompare(right.date) ||
+                  left.startTime.localeCompare(right.startTime),
+              ),
+            scheduleNotice: "日历安排已手动调整",
+            scheduleVersion: 2,
+          };
+        }),
       };
-    }, assignmentId);
+    });
   }
 
   async function sendChatMessage(

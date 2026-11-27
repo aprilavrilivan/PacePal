@@ -463,7 +463,7 @@ test("keeps multiple assignments and lets the user switch between them", async (
   await expect(page.getByText("还没有任务拆解")).toBeVisible();
 });
 
-test("grows busy calendar weeks, supports drag scheduling, and distinguishes weekends", async ({
+test("grows busy calendar weeks, supports drag scheduling and ordering, and distinguishes weekends", async ({
   page,
 }) => {
   const subtasks = fixtureTasks().slice(0, 5);
@@ -540,6 +540,26 @@ test("grows busy calendar weeks, supports drag scheduling, and distinguishes wee
         name: /理解任务要求/,
       }),
   ).toBeVisible();
+
+  const secondTask = events.getByRole("button", { name: /确定完成思路/ });
+  await events
+    .getByRole("button", { name: /完成详细大纲/ })
+    .dragTo(secondTask, { targetPosition: { x: 12, y: 4 } });
+  await expect
+    .poll(() =>
+      events
+        .locator("button")
+        .evaluateAll((buttons) =>
+          buttons.map((button) => button.getAttribute("aria-label")),
+        ),
+    )
+    .toEqual([
+      expect.stringContaining("完成详细大纲"),
+      expect.stringContaining("确定完成思路"),
+      expect.stringContaining("收集并筛选必要资料"),
+      expect.stringContaining("整理要点与证据"),
+    ]);
+  await expect(page.locator("[data-project-span]")).toHaveCount(0);
 
   const cellStyles = await page.locator("[data-date]").evaluateAll((cells) => {
     const currentMonth = new Date().getMonth();

@@ -52,7 +52,7 @@ describe("calendar month view", () => {
 
   afterEach(() => vi.useRealTimers());
 
-  it("lets the busiest day grow its week and connects consecutive project days", () => {
+  it("lets the busiest day grow its week and reorders tasks within a day", () => {
     const onSelectAssignment = vi.fn();
     const onMoveSubtask = vi.fn();
     const { container } = render(
@@ -80,8 +80,8 @@ describe("calendar month view", () => {
       "h-[180px]",
     );
     expect(
-      container.querySelector('[data-project-span="assignment-1"]'),
-    ).toBeInTheDocument();
+      container.querySelector("[data-project-span]"),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /任务 5/ }));
     expect(onSelectAssignment).toHaveBeenCalledWith("assignment-1");
@@ -102,6 +102,37 @@ describe("calendar month view", () => {
       "assignment-1",
       "task-1",
       "2026-11-30",
+      undefined,
+    );
+
+    const secondTask = screen.getByRole("button", { name: /任务 2/ });
+    vi.spyOn(secondTask, "getBoundingClientRect").mockReturnValue({
+      bottom: 100,
+      height: 100,
+      left: 0,
+      right: 100,
+      top: 0,
+      width: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    const reorderTransfer = {
+      ...dataTransfer,
+      getData: vi.fn(() => "assignment-1::task-1"),
+    };
+    fireEvent.dragStart(screen.getByRole("button", { name: /任务 1/ }), {
+      dataTransfer: reorderTransfer,
+    });
+    fireEvent.drop(secondTask, {
+      clientY: 10,
+      dataTransfer: reorderTransfer,
+    });
+    expect(onMoveSubtask).toHaveBeenLastCalledWith(
+      "assignment-1",
+      "task-1",
+      "2026-11-27",
+      { assignmentId: "assignment-1", subtaskId: "task-3" },
     );
   });
 
@@ -126,5 +157,29 @@ describe("calendar month view", () => {
     expect(
       outOfMonthWeekday?.querySelector('time[datetime="2026-10-26"]'),
     ).toHaveClass("text-slate-400");
+  });
+
+  it("uses a distinct color for each project", () => {
+    const first = assignment();
+    const second = {
+      ...assignment(),
+      id: "assignment-2",
+      title: "第二项目",
+    };
+    render(
+      <CalendarMonthView
+        assignments={[first, second]}
+        onMoveSubtask={vi.fn()}
+        onSelectAssignment={vi.fn()}
+      />,
+    );
+
+    const firstColor = screen.getByRole("button", {
+      name: /任务 1，属于测试项目/,
+    }).style.backgroundColor;
+    const secondColor = screen.getByRole("button", {
+      name: /任务 1，属于第二项目/,
+    }).style.backgroundColor;
+    expect(firstColor).not.toBe(secondColor);
   });
 });

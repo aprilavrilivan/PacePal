@@ -7,31 +7,18 @@ import type { Assignment } from "@/features/pacepal/model";
 
 const weekdayLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
-const eventColors = [
-  { background: "#eef2ff", border: "#c7d2fe", dot: "#6366f1", text: "#3730a3" },
-  { background: "#f3e8ff", border: "#e9d5ff", dot: "#9333ea", text: "#6b21a8" },
-  { background: "#ecfdf5", border: "#a7f3d0", dot: "#10b981", text: "#065f46" },
-  { background: "#fff7ed", border: "#fed7aa", dot: "#f97316", text: "#9a3412" },
-  { background: "#eff6ff", border: "#bfdbfe", dot: "#3b82f6", text: "#1e40af" },
-  { background: "#fff1f2", border: "#fecdd3", dot: "#f43f5e", text: "#9f1239" },
-];
-
 type CalendarEntry = {
   assignmentId: string;
   assignmentTitle: string;
   block: Assignment["schedule"][number];
-  colorIndex: number;
+  colors: ReturnType<typeof assignmentColors>;
   status: Assignment["subtasks"][number]["status"];
   subtaskTitle: string;
 };
 
-type ProjectSpan = {
+type CalendarPosition = {
   assignmentId: string;
-  assignmentTitle: string;
-  colorIndex: number;
-  end: number;
-  lane: number;
-  start: number;
+  subtaskId: string;
 };
 
 function dateKey(date: Date) {
@@ -49,61 +36,14 @@ function startOfCalendarGrid(month: Date) {
   return start;
 }
 
-function assignmentColorIndex(assignmentId: string) {
-  let hash = 0;
-  for (const character of assignmentId) {
-    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  }
-  return hash % eventColors.length;
-}
-
-function spansForWeek(
-  week: Date[],
-  assignments: Assignment[],
-  entriesByDate: Map<string, CalendarEntry[]>,
-) {
-  const spans: ProjectSpan[] = [];
-  let lane = 0;
-
-  for (const assignment of assignments) {
-    const activeDays = week
-      .map((date, index) => ({
-        index,
-        scheduled: (entriesByDate.get(dateKey(date)) ?? []).some(
-          (entry) => entry.assignmentId === assignment.id,
-        ),
-      }))
-      .filter((day) => day.scheduled)
-      .map((day) => day.index);
-    const projectSpans: Array<{ start: number; end: number }> = [];
-
-    for (const index of activeDays) {
-      const current = projectSpans.at(-1);
-      if (current && index === current.end + 1) {
-        current.end = index;
-      } else {
-        projectSpans.push({ start: index, end: index });
-      }
-    }
-
-    const continuous = projectSpans.filter(
-      (span) => span.end - span.start >= 1,
-    );
-    if (continuous.length === 0) continue;
-
-    spans.push(
-      ...continuous.map((span) => ({
-        ...span,
-        assignmentId: assignment.id,
-        assignmentTitle: assignment.title,
-        colorIndex: assignmentColorIndex(assignment.id),
-        lane,
-      })),
-    );
-    lane += 1;
-  }
-
-  return { laneCount: lane, spans };
+function assignmentColors(index: number) {
+  const hue = Math.round((246 + index * 137.508) % 360);
+  return {
+    background: `hsl(${hue} 85% 96%)`,
+    border: `hsl(${hue} 72% 84%)`,
+    dot: `hsl(${hue} 70% 55%)`,
+    text: `hsl(${hue} 62% 34%)`,
+  };
 }
 
 export function CalendarMonthView({
@@ -116,6 +56,7 @@ export function CalendarMonthView({
     assignmentId: string,
     subtaskId: string,
     date: string,
+    before?: CalendarPosition,
   ) => void;
   onSelectAssignment: (assignmentId: string) => void;
 }) {
@@ -132,11 +73,11 @@ export function CalendarMonthView({
   const entriesByDate = useMemo(() => {
     const grouped = new Map<string, CalendarEntry[]>();
 
-    for (const assignment of assignments) {
+    for (const [assignmentIndex, assignment] of assignments.entries()) {
       const subtasks = new Map(
         assignment.subtasks.map((subtask) => [subtask.id, subtask]),
       );
-      const colorIndex = assignmentColorIndex(assignment.id);
+      const colors = assignmentColors(assignmentIndex);
 
       for (const block of assignment.schedule) {
         const subtask = subtasks.get(block.subtaskId);
@@ -146,7 +87,7 @@ export function CalendarMonthView({
           assignmentId: assignment.id,
           assignmentTitle: assignment.title,
           block,
-          colorIndex,
+          colors,
           status: subtask.status,
           subtaskTitle: subtask.title,
         });
@@ -200,7 +141,11 @@ export function CalendarMonthView({
     });
   }
 
-  function dropOnDate(event: DragEvent, date: string) {
+  function dropOnDate(
+    event: DragEvent,
+    date: string,
+    before?: CalendarPosition,
+  ) {
     event.preventDefault();
     const [assignmentId, subtaskId] = (
       event.dataTransfer.getData("text/plain") ||
@@ -209,7 +154,7 @@ export function CalendarMonthView({
     setDragging(null);
     setDropTarget(null);
     if (assignmentId && subtaskId) {
-      onMoveSubtask(assignmentId, subtaskId, date);
+      onMoveSubtask(assignmentId, subtaskId, date, before);
     }
   }
 
@@ -270,11 +215,6 @@ export function CalendarMonthView({
 
           <div className="divide-y divide-slate-200/80">
             {weeks.map((week) => {
-              const { laneCount, spans } = spansForWeek(
-                week,
-                assignments,
-                entriesByDate,
-              );
               return (
                 <div
                   className="relative grid grid-cols-7 gap-px bg-slate-200/80"
@@ -339,17 +279,17 @@ export function CalendarMonthView({
                           }
                           className="space-y-1.5"
                           data-calendar-events={key}
-                          style={{ marginTop: laneCount * 24 }}
                         >
-                          {entries.map((entry) => {
-                            const colors = eventColors[entry.colorIndex];
+                          {entries.map((entry, entryIndex) => {
+                            const colors = entry.colors;
                             const completed = entry.status === "completed";
+                            const entryKey = `${entry.assignmentId}::${entry.block.subtaskId}`;
                             return (
                               <button
                                 aria-label={`${entry.block.startTime} ${entry.subtaskTitle}，属于${entry.assignmentTitle}`}
                                 className={`block w-full cursor-grab overflow-hidden rounded-md border px-2 py-1.5 text-left transition hover:brightness-95 focus:ring-2 focus:ring-violet-500/30 focus:outline-none active:cursor-grabbing ${
                                   completed ? "opacity-55" : ""
-                                }`}
+                                } ${dropTarget === entryKey ? "ring-2 ring-violet-500" : ""}`}
                                 draggable={!completed}
                                 key={`${entry.assignmentId}-${entry.block.id}`}
                                 onClick={() =>
@@ -359,15 +299,55 @@ export function CalendarMonthView({
                                   setDragging(null);
                                   setDropTarget(null);
                                 }}
+                                onDragEnter={(event) => {
+                                  if (!dragging) return;
+                                  event.stopPropagation();
+                                  setDropTarget(entryKey);
+                                }}
+                                onDragOver={(event) => {
+                                  if (!dragging) return;
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  event.dataTransfer.dropEffect = "move";
+                                }}
                                 onDragStart={(event) =>
                                   startDragging(event, entry)
                                 }
+                                onDrop={(event) => {
+                                  event.stopPropagation();
+                                  const sourceKey = dragging
+                                    ? `${dragging.assignmentId}::${dragging.subtaskId}`
+                                    : event.dataTransfer.getData("text/plain");
+                                  if (sourceKey === entryKey) {
+                                    setDragging(null);
+                                    setDropTarget(null);
+                                    return;
+                                  }
+                                  const rect =
+                                    event.currentTarget.getBoundingClientRect();
+                                  const nextEntry = entries[entryIndex + 1];
+                                  const before =
+                                    event.clientY < rect.top + rect.height / 2
+                                      ? {
+                                          assignmentId: entry.assignmentId,
+                                          subtaskId: entry.block.subtaskId,
+                                        }
+                                      : nextEntry
+                                        ? {
+                                            assignmentId:
+                                              nextEntry.assignmentId,
+                                            subtaskId:
+                                              nextEntry.block.subtaskId,
+                                          }
+                                        : undefined;
+                                  dropOnDate(event, key, before);
+                                }}
                                 style={{
                                   backgroundColor: colors.background,
                                   borderColor: colors.border,
                                   color: colors.text,
                                 }}
-                                title={`${entry.subtaskTitle} · ${entry.assignmentTitle} · ${entry.block.durationMinutes} 分钟；拖动可改期`}
+                                title={`${entry.subtaskTitle} · ${entry.assignmentTitle} · ${entry.block.durationMinutes} 分钟；拖动可改期或调整顺序`}
                                 type="button"
                               >
                                 <span
@@ -394,35 +374,6 @@ export function CalendarMonthView({
                       </div>
                     );
                   })}
-
-                  {spans.length > 0 ? (
-                    <div className="pointer-events-none absolute inset-x-0 top-11 z-10 grid grid-cols-7 gap-y-1 px-1">
-                      {spans.map((span) => {
-                        const colors = eventColors[span.colorIndex];
-                        return (
-                          <button
-                            className="pointer-events-auto h-5 truncate px-2 text-left text-[11px] font-semibold shadow-sm"
-                            data-project-span={span.assignmentId}
-                            key={`${span.assignmentId}-${span.start}-${span.end}`}
-                            onClick={() =>
-                              onSelectAssignment(span.assignmentId)
-                            }
-                            style={{
-                              backgroundColor: colors.background,
-                              borderColor: colors.border,
-                              color: colors.text,
-                              gridColumn: `${span.start + 1} / ${span.end + 2}`,
-                              gridRow: span.lane + 1,
-                            }}
-                            title={`${span.assignmentTitle} · 连续安排`}
-                            type="button"
-                          >
-                            {span.assignmentTitle}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
                 </div>
               );
             })}
