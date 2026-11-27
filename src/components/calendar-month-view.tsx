@@ -1,7 +1,7 @@
 "use client";
 
 import type { DragEvent } from "react";
-import { useMemo, useState } from "react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Assignment } from "@/features/pacepal/model";
 
@@ -19,6 +19,13 @@ type CalendarEntry = {
 type CalendarPosition = {
   assignmentId: string;
   subtaskId: string;
+};
+
+type DraggingTask = CalendarPosition;
+
+type DropPreview = {
+  date: string;
+  index: number;
 };
 
 function dateKey(date: Date) {
@@ -46,6 +53,37 @@ function assignmentColors(index: number) {
   };
 }
 
+function entryKey(entry: CalendarEntry) {
+  return `${entry.assignmentId}::${entry.block.subtaskId}`;
+}
+
+function DropSlot({
+  colors,
+  date,
+  onDrop,
+}: {
+  colors?: CalendarEntry["colors"];
+  date: string;
+  onDrop: (event: DragEvent<HTMLDivElement>) => void;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className="h-[3.25rem] shrink-0 rounded-md border-2 border-dashed border-violet-400 bg-violet-50 shadow-inner transition-all duration-150"
+      data-drop-placeholder={date}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onDrop={onDrop}
+      style={{
+        backgroundColor: colors?.background,
+        borderColor: colors?.dot,
+      }}
+    />
+  );
+}
+
 export function CalendarMonthView({
   assignments,
   onMoveSubtask,
@@ -64,11 +102,10 @@ export function CalendarMonthView({
   const [visibleMonth, setVisibleMonth] = useState(
     () => new Date(today.getFullYear(), today.getMonth(), 1),
   );
-  const [dragging, setDragging] = useState<{
-    assignmentId: string;
-    subtaskId: string;
-  } | null>(null);
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<DraggingTask | null>(null);
+  const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
+  const cardRefs = useRef(new Map<string, HTMLButtonElement>());
+  const previousPositions = useRef(new Map<string, DOMRect>());
 
   const entriesByDate = useMemo(() => {
     const grouped = new Map<string, CalendarEntry[]>();
@@ -106,6 +143,40 @@ export function CalendarMonthView({
     return grouped;
   }, [assignments]);
 
+  useLayoutEffect(() => {
+    const nextPositions = new Map<string, DOMRect>();
+    for (const [key, element] of cardRefs.current) {
+      element.getAnimations?.().forEach((animation) => animation.cancel());
+      nextPositions.set(key, element.getBoundingClientRect());
+    }
+    for (const [key, next] of nextPositions) {
+      const previous = previousPositions.current.get(key);
+      const element = cardRefs.current.get(key);
+      if (!previous || !element) continue;
+      const x = previous.left - next.left;
+      const y = previous.top - next.top;
+      if (x === 0 && y === 0) continue;
+      element.animate?.(
+        [
+          { transform: `translate(${x}px, ${y}px)` },
+          { transform: "translate(0, 0)" },
+        ],
+        { duration: 170, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+      );
+    }
+    previousPositions.current = nextPositions;
+  }, [dragging, dropPreview, entriesByDate]);
+
+  const draggedColors = dragging
+    ? [...entriesByDate.values()]
+        .flat()
+        .find(
+          (entry) =>
+            entry.assignmentId === dragging.assignmentId &&
+            entry.block.subtaskId === dragging.subtaskId,
+        )?.colors
+    : null;
+
   const weeks = useMemo(() => {
     const start = startOfCalendarGrid(visibleMonth);
     const days = Array.from({ length: 42 }, (_, index) => {
@@ -132,29 +203,69 @@ export function CalendarMonthView({
   }
 
   function startDragging(event: DragEvent, entry: CalendarEntry) {
-    const value = `${entry.assignmentId}::${entry.block.subtaskId}`;
+    const value = entryKey(entry);
+    const sourceIndex = (entriesByDate.get(entry.block.date) ?? []).findIndex(
+      (candidate) => entryKey(candidate) === value,
+    );
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", value);
     setDragging({
       assignmentId: entry.assignmentId,
       subtaskId: entry.block.subtaskId,
     });
+    setDropPreview({ date: entry.block.date, index: Math.max(0, sourceIndex) });
   }
 
-  function dropOnDate(
-    event: DragEvent,
-    date: string,
-    before?: CalendarPosition,
-  ) {
+  function entriesWithoutDragged(date: string) {
+    const draggedKey = dragging
+      ? `${dragging.assignmentId}::${dragging.subtaskId}`
+      : null;
+    return (entriesByDate.get(date) ?? []).filter(
+      (entry) => entryKey(entry) !== draggedKey,
+    );
+  }
+
+  function previewDrop(date: string, index: number) {
+    setDropPreview((current) =>
+      current?.date === date && current.index === index
+        ? current
+        : { date, index },
+    );
+  }
+
+  function insertionIndex(event: DragEvent, date: string, targetKey: string) {
+    const entries = entriesWithoutDragged(date);
+    const targetIndex = entries.findIndex(
+      (entry) => entryKey(entry) === targetKey,
+    );
+    if (targetIndex < 0) return entries.length;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return (
+      targetIndex + (event.clientY >= bounds.top + bounds.height / 2 ? 1 : 0)
+    );
+  }
+
+  function dropOnDate(event: DragEvent, date: string, index: number) {
     event.preventDefault();
     const [assignmentId, subtaskId] = (
       event.dataTransfer.getData("text/plain") ||
       (dragging ? `${dragging.assignmentId}::${dragging.subtaskId}` : "")
     ).split("::");
+    const beforeEntry = entriesWithoutDragged(date)[index];
     setDragging(null);
-    setDropTarget(null);
+    setDropPreview(null);
     if (assignmentId && subtaskId) {
-      onMoveSubtask(assignmentId, subtaskId, date, before);
+      onMoveSubtask(
+        assignmentId,
+        subtaskId,
+        date,
+        beforeEntry
+          ? {
+              assignmentId: beforeEntry.assignmentId,
+              subtaskId: beforeEntry.block.subtaskId,
+            }
+          : undefined,
+      );
     }
   }
 
@@ -223,6 +334,15 @@ export function CalendarMonthView({
                   {week.map((date) => {
                     const key = dateKey(date);
                     const entries = entriesByDate.get(key) ?? [];
+                    const draggedKey = dragging
+                      ? `${dragging.assignmentId}::${dragging.subtaskId}`
+                      : null;
+                    const visibleEntryCount = entries.filter(
+                      (entry) => entryKey(entry) !== draggedKey,
+                    ).length;
+                    const previewIndex =
+                      dropPreview?.date === key ? dropPreview.index : null;
+                    let visibleIndex = 0;
                     const isCurrentMonth =
                       date.getMonth() === visibleMonth.getMonth() &&
                       date.getFullYear() === visibleMonth.getFullYear();
@@ -234,18 +354,17 @@ export function CalendarMonthView({
                       <div
                         className={`min-h-[10rem] min-w-0 p-2.5 transition ${
                           isWeekend ? "bg-slate-50/90" : "bg-white"
-                        } ${dropTarget === key ? "ring-2 ring-violet-500 ring-inset" : ""}`}
+                        } ${previewIndex !== null ? "ring-2 ring-violet-500 ring-inset" : ""}`}
                         data-date={key}
                         key={key}
-                        onDragEnter={() => dragging && setDropTarget(key)}
                         onDragLeave={(event) => {
                           if (
                             !event.currentTarget.contains(
                               event.relatedTarget as Node | null,
                             )
                           ) {
-                            setDropTarget((current) =>
-                              current === key ? null : current,
+                            setDropPreview((current) =>
+                              current?.date === key ? null : current,
                             );
                           }
                         }}
@@ -253,8 +372,15 @@ export function CalendarMonthView({
                           if (!dragging) return;
                           event.preventDefault();
                           event.dataTransfer.dropEffect = "move";
+                          previewDrop(key, visibleEntryCount);
                         }}
-                        onDrop={(event) => dropOnDate(event, key)}
+                        onDrop={(event) =>
+                          dropOnDate(
+                            event,
+                            key,
+                            previewIndex ?? visibleEntryCount,
+                          )
+                        }
                       >
                         <div className="mb-2 flex justify-end">
                           <time
@@ -277,99 +403,120 @@ export function CalendarMonthView({
                               ? `${date.getMonth() + 1}月${date.getDate()}日计划，共${entries.length}项`
                               : undefined
                           }
-                          className="space-y-1.5"
+                          className="flex flex-col gap-1.5"
                           data-calendar-events={key}
                         >
-                          {entries.map((entry, entryIndex) => {
+                          {entries.map((entry) => {
                             const colors = entry.colors;
                             const completed = entry.status === "completed";
-                            const entryKey = `${entry.assignmentId}::${entry.block.subtaskId}`;
+                            const currentKey = entryKey(entry);
+                            const isDragged = currentKey === draggedKey;
+                            const currentVisibleIndex = visibleIndex;
+                            if (!isDragged) visibleIndex += 1;
                             return (
-                              <button
-                                aria-label={`${entry.block.startTime} ${entry.subtaskTitle}，属于${entry.assignmentTitle}`}
-                                className={`block w-full cursor-grab overflow-hidden rounded-md border px-2 py-1.5 text-left transition hover:brightness-95 focus:ring-2 focus:ring-violet-500/30 focus:outline-none active:cursor-grabbing ${
-                                  completed ? "opacity-55" : ""
-                                } ${dropTarget === entryKey ? "ring-2 ring-violet-500" : ""}`}
-                                draggable={!completed}
+                              <Fragment
                                 key={`${entry.assignmentId}-${entry.block.id}`}
-                                onClick={() =>
-                                  onSelectAssignment(entry.assignmentId)
-                                }
-                                onDragEnd={() => {
-                                  setDragging(null);
-                                  setDropTarget(null);
-                                }}
-                                onDragEnter={(event) => {
-                                  if (!dragging) return;
-                                  event.stopPropagation();
-                                  setDropTarget(entryKey);
-                                }}
-                                onDragOver={(event) => {
-                                  if (!dragging) return;
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  event.dataTransfer.dropEffect = "move";
-                                }}
-                                onDragStart={(event) =>
-                                  startDragging(event, entry)
-                                }
-                                onDrop={(event) => {
-                                  event.stopPropagation();
-                                  const sourceKey = dragging
-                                    ? `${dragging.assignmentId}::${dragging.subtaskId}`
-                                    : event.dataTransfer.getData("text/plain");
-                                  if (sourceKey === entryKey) {
-                                    setDragging(null);
-                                    setDropTarget(null);
-                                    return;
-                                  }
-                                  const rect =
-                                    event.currentTarget.getBoundingClientRect();
-                                  const nextEntry = entries[entryIndex + 1];
-                                  const before =
-                                    event.clientY < rect.top + rect.height / 2
-                                      ? {
-                                          assignmentId: entry.assignmentId,
-                                          subtaskId: entry.block.subtaskId,
-                                        }
-                                      : nextEntry
-                                        ? {
-                                            assignmentId:
-                                              nextEntry.assignmentId,
-                                            subtaskId:
-                                              nextEntry.block.subtaskId,
-                                          }
-                                        : undefined;
-                                  dropOnDate(event, key, before);
-                                }}
-                                style={{
-                                  backgroundColor: colors.background,
-                                  borderColor: colors.border,
-                                  color: colors.text,
-                                }}
-                                title={`${entry.subtaskTitle} · ${entry.assignmentTitle} · ${entry.block.durationMinutes} 分钟；拖动可改期或调整顺序`}
-                                type="button"
                               >
-                                <span
-                                  className={`block truncate text-xs font-semibold ${
-                                    completed ? "line-through" : ""
-                                  }`}
-                                >
-                                  {entry.block.startTime} · {entry.subtaskTitle}
-                                </span>
-                                <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] font-medium opacity-75">
-                                  <span
-                                    aria-hidden="true"
-                                    className="size-1.5 shrink-0 rounded-full"
-                                    style={{ backgroundColor: colors.dot }}
+                                {!isDragged &&
+                                previewIndex === currentVisibleIndex ? (
+                                  <DropSlot
+                                    colors={draggedColors ?? colors}
+                                    date={key}
+                                    onDrop={(event) => {
+                                      event.stopPropagation();
+                                      dropOnDate(
+                                        event,
+                                        key,
+                                        currentVisibleIndex,
+                                      );
+                                    }}
                                   />
-                                  <span className="truncate">
-                                    {entry.assignmentTitle}
+                                ) : null}
+                                <button
+                                  aria-hidden={isDragged || undefined}
+                                  aria-label={`${entry.block.startTime} ${entry.subtaskTitle}，属于${entry.assignmentTitle}`}
+                                  className={`block max-h-20 w-full cursor-grab overflow-hidden rounded-md border px-2 py-1.5 text-left transition-all duration-150 hover:brightness-95 focus:ring-2 focus:ring-violet-500/30 focus:outline-none active:cursor-grabbing ${
+                                    completed ? "opacity-55" : ""
+                                  } ${isDragged ? "pointer-events-none max-h-0 border-0 py-0 opacity-0" : ""}`}
+                                  draggable={!completed}
+                                  onClick={() =>
+                                    onSelectAssignment(entry.assignmentId)
+                                  }
+                                  onDragEnd={() => {
+                                    setDragging(null);
+                                    setDropPreview(null);
+                                  }}
+                                  onDragOver={(event) => {
+                                    if (!dragging || isDragged) return;
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    event.dataTransfer.dropEffect = "move";
+                                    previewDrop(
+                                      key,
+                                      insertionIndex(event, key, currentKey),
+                                    );
+                                  }}
+                                  onDragStart={(event) =>
+                                    startDragging(event, entry)
+                                  }
+                                  onDrop={(event) => {
+                                    if (!dragging || isDragged) return;
+                                    event.stopPropagation();
+                                    dropOnDate(
+                                      event,
+                                      key,
+                                      insertionIndex(event, key, currentKey),
+                                    );
+                                  }}
+                                  ref={(element) => {
+                                    if (element) {
+                                      cardRefs.current.set(currentKey, element);
+                                    } else {
+                                      cardRefs.current.delete(currentKey);
+                                    }
+                                  }}
+                                  style={{
+                                    backgroundColor: colors.background,
+                                    borderColor: colors.border,
+                                    color: colors.text,
+                                  }}
+                                  tabIndex={isDragged ? -1 : undefined}
+                                  title={`${entry.subtaskTitle} · ${entry.assignmentTitle} · ${entry.block.durationMinutes} 分钟；拖动可改期或调整顺序`}
+                                  type="button"
+                                >
+                                  <span
+                                    className={`block truncate text-xs font-semibold ${
+                                      completed ? "line-through" : ""
+                                    }`}
+                                  >
+                                    {entry.block.startTime} ·{" "}
+                                    {entry.subtaskTitle}
                                   </span>
-                                </span>
-                              </button>
+                                  <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] font-medium opacity-75">
+                                    <span
+                                      aria-hidden="true"
+                                      className="size-1.5 shrink-0 rounded-full"
+                                      style={{ backgroundColor: colors.dot }}
+                                    />
+                                    <span className="truncate">
+                                      {entry.assignmentTitle}
+                                    </span>
+                                  </span>
+                                </button>
+                              </Fragment>
                             );
                           })}
+                          {previewIndex !== null &&
+                          previewIndex >= visibleEntryCount ? (
+                            <DropSlot
+                              colors={draggedColors ?? undefined}
+                              date={key}
+                              onDrop={(event) => {
+                                event.stopPropagation();
+                                dropOnDate(event, key, visibleEntryCount);
+                              }}
+                            />
+                          ) : null}
                         </div>
                       </div>
                     );

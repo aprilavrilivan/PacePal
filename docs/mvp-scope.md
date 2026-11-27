@@ -79,6 +79,7 @@ Every MVP feature must follow these rules:
 - Distribute multiple whole subtasks per day when there are more tasks than days before the deadline.
 - Prevent required dependencies from being scheduled out of order.
 - Allow the user to drag a subtask to another date or reorder it within a day.
+- Preview the insertion point while neighboring calendar tasks move aside.
 - Use a distinct calendar color for each project.
 
 ### 4.5 Context-aware next-step recommendation

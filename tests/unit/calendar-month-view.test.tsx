@@ -124,6 +124,13 @@ describe("calendar month view", () => {
     fireEvent.dragStart(screen.getByRole("button", { name: /任务 1/ }), {
       dataTransfer: reorderTransfer,
     });
+    fireEvent.dragOver(secondTask, {
+      clientY: 10,
+      dataTransfer: reorderTransfer,
+    });
+    expect(
+      container.querySelector('[data-drop-placeholder="2026-11-27"]'),
+    ).toBeInTheDocument();
     fireEvent.drop(secondTask, {
       clientY: 10,
       dataTransfer: reorderTransfer,
@@ -132,7 +139,7 @@ describe("calendar month view", () => {
       "assignment-1",
       "task-1",
       "2026-11-27",
-      { assignmentId: "assignment-1", subtaskId: "task-3" },
+      { assignmentId: "assignment-1", subtaskId: "task-2" },
     );
   });
 
