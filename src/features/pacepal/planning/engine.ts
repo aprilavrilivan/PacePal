@@ -12,6 +12,7 @@ import type {
   PlanOperation,
   PlanSnapshot,
   TaskGroupingProposal,
+  TaskSplitProposal,
 } from "@/features/pacepal/planning/contracts";
 import { planSnapshotSchema } from "@/features/pacepal/planning/contracts";
 
@@ -425,6 +426,50 @@ export function buildTaskGroupingOperations(
   });
 
   return operations.length > 0 ? [...operations, { type: "reschedule" }] : [];
+}
+
+export function buildTaskSplitOperations(
+  assignment: Assignment,
+  proposal: TaskSplitProposal,
+): PlanOperation[] {
+  const source = assignment.subtasks.find(
+    (task) => task.id === proposal.sourceTaskId,
+  );
+  const issues: string[] = [];
+  if (!source) issues.push(`Unknown task id: ${proposal.sourceTaskId}.`);
+  if (source?.status === "completed") {
+    issues.push("Completed tasks cannot be split.");
+  }
+  if (source && proposal.titles.length * 5 > source.estimatedMinutes) {
+    issues.push("The source task is too short for that many subtasks.");
+  }
+  if (new Set(proposal.titles).size !== proposal.titles.length) {
+    issues.push("Split task titles must be unique.");
+  }
+  if (issues.length > 0 || !source) throw new PlanValidationError(issues);
+
+  const baseMinutes = Math.floor(
+    source.estimatedMinutes / proposal.titles.length,
+  );
+  const remainder = source.estimatedMinutes % proposal.titles.length;
+  return [
+    {
+      type: "split_task",
+      taskId: source.id,
+      tasks: proposal.titles.map((title, index) => ({
+        tempId: `split-${index + 1}`,
+        title,
+        description: joinedText([source.description, title], 1200),
+        estimatedMinutes: baseMinutes + (index < remainder ? 1 : 0),
+        completionCriteria: joinedText([`${title}已完成。`], 600),
+        difficulty: source.difficulty,
+        priority: source.taskPriority ?? assignment.priority,
+        dependencies: index === 0 ? [] : [`split-${index}`],
+        phase: source.phase ?? "计划执行",
+      })),
+    },
+    { type: "reschedule" },
+  ];
 }
 
 function uniqueReferences(values: string[]) {

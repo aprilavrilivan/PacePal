@@ -140,7 +140,8 @@ const cases = [
     path: "/api/plan",
     payload: () => ({
       title: "课程研究报告",
-      requirements: "两周内完成3000字报告，需要检索、分析、写作、复核和提交。",
+      requirements:
+        "两周内完成3000字报告，分析短视频推荐算法对大学生新闻获取的影响；至少引用6篇学术文献，使用APA格式，需要检索、分析、写作、复核和提交。",
       deliverable: "3000字报告",
       deadline: "2026-12-20T18:00:00.000Z",
       priority: "high",

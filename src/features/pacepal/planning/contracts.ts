@@ -149,6 +149,12 @@ export const taskGroupingProposalSchema = z.object({
     .max(50),
 });
 
+export const taskSplitProposalSchema = z.object({
+  language: planningLanguageSchema,
+  sourceTaskId: z.string().trim().min(1),
+  titles: z.array(z.string().trim().min(1).max(160)).min(2).max(8),
+});
+
 export const refinementRequestSchema = z.object({
   assignment: assignmentSchema,
   message: z.string().trim().min(1).max(6000),
@@ -220,6 +226,7 @@ export type InitialPlanDecision = z.infer<typeof initialPlanDecisionSchema>;
 export type PlanOperation = z.infer<typeof planOperationSchema>;
 export type RefinementDecision = z.infer<typeof refinementDecisionSchema>;
 export type TaskGroupingProposal = z.infer<typeof taskGroupingProposalSchema>;
+export type TaskSplitProposal = z.infer<typeof taskSplitProposalSchema>;
 export type PlanSnapshot = z.infer<typeof planSnapshotSchema>;
 export type ModelUsage = z.infer<typeof modelUsageSchema>;
 export type PlanApiResponse = z.infer<typeof planApiResponseSchema>;

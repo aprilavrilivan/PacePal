@@ -7,6 +7,7 @@ import {
   initialPlanDecisionSchema,
   refinementDecisionSchema,
   taskGroupingProposalSchema,
+  taskSplitProposalSchema,
   type InitialPlanDecision,
   type ModelUsage,
   type RefinementDecision,
@@ -14,6 +15,7 @@ import {
 import {
   applyPlanOperations,
   buildTaskGroupingOperations,
+  buildTaskSplitOperations,
   normalizeTaskGrouping,
   PlanValidationError,
   validateDraftPhases,
@@ -30,7 +32,9 @@ import {
   refinementSystemPrompt,
   refinementUserPrompt,
   requestedTaskGroupingCount,
+  requestsTaskSplit,
   taskGroupingPrompt,
+  taskSplitPrompt,
 } from "@/features/pacepal/planning/prompts";
 import { withPlanningTimeout } from "@/features/pacepal/planning/timeout";
 
@@ -227,6 +231,61 @@ async function generateLiveTaskGrouping(
   };
 }
 
+async function generateLiveTaskSplit(assignment: Assignment, message: string) {
+  const result = await runPlanningCall({
+    generate: async (abortSignal) => {
+      const response = await generateText({
+        abortSignal,
+        maxOutputTokens: 2000,
+        maxRetries: 0,
+        model: gateway(planningModel),
+        output: Output.object({
+          description:
+            "One existing task id and a concise ordered list of replacement task titles.",
+          name: "pacepal_task_split",
+          schema: taskSplitProposalSchema,
+        }),
+        reasoning: "low",
+        prompt: taskSplitPrompt(assignment, message),
+      });
+      return { usage: response.usage, value: response.output };
+    },
+    validate: (value) => {
+      try {
+        const operations = buildTaskSplitOperations(assignment, value);
+        applyPlanOperations(assignment, operations, {
+          language: value.language,
+          summary: "Validate task split.",
+          now: new Date(0),
+        });
+        return "";
+      } catch (error) {
+        return error instanceof PlanValidationError
+          ? error.issues.join(" | ")
+          : "The generated task split is invalid.";
+      }
+    },
+  });
+  const operations = buildTaskSplitOperations(assignment, result.value);
+  const source = assignment.subtasks.find(
+    (task) => task.id === result.value.sourceTaskId,
+  )!;
+  return {
+    decision: {
+      language: result.value.language,
+      intent: "task_breakdown" as const,
+      assistantMessage:
+        result.value.language === "zh"
+          ? `已将“${source.title}”拆成 ${result.value.titles.length} 步：${result.value.titles.join("、")}。原任务的进度、总耗时和依赖均已保留。`
+          : `I split “${source.title}” into ${result.value.titles.length} steps: ${result.value.titles.join(", ")}. Its progress, total duration, and dependencies were preserved.`,
+      confirmation: "not_required" as const,
+      operations,
+    },
+    model: planningModel,
+    usage: result.usage,
+  };
+}
+
 export async function generateLiveInitialPlan(
   assignment: AssignmentInput,
 ): Promise<{
@@ -294,6 +353,9 @@ export async function generateLiveRefinement(
   const groupingCount = requestedTaskGroupingCount(message);
   if (groupingCount !== null && groupingCount < assignment.subtasks.length) {
     return generateLiveTaskGrouping(assignment, groupingCount);
+  }
+  if (requestsTaskSplit(message)) {
+    return generateLiveTaskSplit(assignment, message);
   }
 
   const result = await runPlanningCall({

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { requestedTaskGroupingCount } from "@/features/pacepal/planning/prompts";
+import {
+  requestedTaskGroupingCount,
+  requestsTaskSplit,
+} from "@/features/pacepal/planning/prompts";
 
 describe("task grouping intent", () => {
   it.each([
@@ -10,5 +13,15 @@ describe("task grouping intent", () => {
     ["这些任务分别是什么？", null],
   ])("extracts a target count from %s", (message, expected) => {
     expect(requestedTaskGroupingCount(message)).toBe(expected);
+  });
+});
+
+describe("task split intent", () => {
+  it.each([
+    ["把文献检索进一步拆细。", true],
+    ["Break the drafting task down into smaller steps.", true],
+    ["文献检索一共有几步？", false],
+  ])("recognizes %s", (message, expected) => {
+    expect(requestsTaskSplit(message)).toBe(expected);
   });
 });

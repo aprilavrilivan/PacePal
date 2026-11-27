@@ -131,6 +131,27 @@ export function requestedTaskGroupingCount(message: string) {
   return Number.isInteger(count) && count > 0 ? count : null;
 }
 
+export function requestsTaskSplit(message: string) {
+  return /拆细|拆分|进一步分解|分解成|split|break.{0,20}down/i.test(message);
+}
+
+export function taskSplitPrompt(assignment: Assignment, message: string) {
+  return JSON.stringify({
+    instruction:
+      "Identify the one existing unfinished task the user wants to split and return 2-8 concise, ordered, non-overlapping subtask titles. Return an existing task id exactly. Do not split a completed task. The backend will preserve status, duration, details, and dependencies.",
+    userMessage: message,
+    project: assignment.title,
+    tasks: assignment.subtasks.map((task) => ({
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      estimatedMinutes: task.estimatedMinutes,
+      status: task.status,
+      maximumParts: Math.min(8, Math.floor(task.estimatedMinutes / 5)),
+    })),
+  });
+}
+
 export function refinementUserPrompt(
   assignment: Assignment,
   message: string,

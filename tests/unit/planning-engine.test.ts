@@ -5,6 +5,7 @@ import type { InitialPlanDecision } from "@/features/pacepal/planning/contracts"
 import {
   applyPlanOperations,
   buildTaskGroupingOperations,
+  buildTaskSplitOperations,
   materializeInitialPlan,
   PlanValidationError,
   validateDraftPhases,
@@ -361,5 +362,47 @@ describe("atomic plan operations", () => {
       ),
     ).toThrow(PlanValidationError);
     expect(current).toEqual(original);
+  });
+
+  it("splits one task while preserving progress, duration, and dependencies", () => {
+    const current = assignment();
+    const source = current.subtasks[3]!;
+    source.status = "in_progress";
+    source.activeSince = "2026-11-25T09:00:00.000Z";
+    source.actualMinutes = 12;
+    const dependent = current.subtasks[4]!;
+    const totalMinutes = current.subtasks.reduce(
+      (total, task) => total + task.estimatedMinutes,
+      0,
+    );
+    const operations = buildTaskSplitOperations(current, {
+      language: "en",
+      sourceTaskId: source.id,
+      titles: ["Find sources", "Extract evidence", "Record citations"],
+    });
+    const result = applyPlanOperations(current, operations, {
+      language: "en",
+      summary: "Split one task.",
+    });
+    const replacements = result.assignment.subtasks.slice(3, 6);
+
+    expect(replacements[0]).toMatchObject({
+      activeSince: "2026-11-25T09:00:00.000Z",
+      actualMinutes: 12,
+      status: "in_progress",
+    });
+    expect(replacements[1]!.dependencies).toEqual([replacements[0]!.id]);
+    expect(replacements[2]!.dependencies).toEqual([replacements[1]!.id]);
+    expect(
+      result.assignment.subtasks.find((task) => task.id === dependent.id)
+        ?.dependencies,
+    ).toContain(replacements[2]!.id);
+    expect(
+      result.assignment.subtasks.reduce(
+        (total, task) => total + task.estimatedMinutes,
+        0,
+      ),
+    ).toBe(totalMinutes);
+    expect(() => validateSubtasks(result.assignment.subtasks)).not.toThrow();
   });
 });
