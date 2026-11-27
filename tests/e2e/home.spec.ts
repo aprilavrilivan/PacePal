@@ -519,11 +519,28 @@ test("scrolls through every calendar item and distinguishes weekends from adjace
     )
     .toBe(true);
 
+  await page.evaluate(() => window.scrollTo(0, 0));
   await events.hover();
+  const pageScrollBeforePackedCell = await page.evaluate(() => window.scrollY);
   await page.mouse.wheel(0, 180);
   await expect
     .poll(() => events.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(
+    pageScrollBeforePackedCell,
+  );
+
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const emptyCell = page
+    .locator("[data-calendar-events]")
+    .filter({ hasNot: page.locator("button") })
+    .first();
+  await emptyCell.hover();
+  const pageScrollBeforeEmptyCell = await page.evaluate(() => window.scrollY);
+  await page.mouse.wheel(0, 180);
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY))
+    .toBeGreaterThan(pageScrollBeforeEmptyCell);
 
   const cellStyles = await page.locator("[data-date]").evaluateAll((cells) => {
     const currentMonth = new Date().getMonth();

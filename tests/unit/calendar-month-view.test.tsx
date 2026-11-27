@@ -74,7 +74,8 @@ describe("calendar month view", () => {
     const events = container.querySelector(
       '[data-calendar-events="2026-11-27"]',
     );
-    expect(events).toHaveClass("overflow-y-auto", "overscroll-contain");
+    expect(events).toHaveClass("overflow-y-auto");
+    expect(events).not.toHaveClass("overscroll-contain");
 
     fireEvent.click(screen.getByRole("button", { name: /任务 5/ }));
     expect(onSelectAssignment).toHaveBeenCalledWith("assignment-1");
