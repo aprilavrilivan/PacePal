@@ -6,6 +6,12 @@ const baseUrl =
 const proxy = process.env.HTTPS_PROXY ?? "http://127.0.0.1:7897";
 const repeat = Number(process.env.PACEPAL_STRESS_REPEAT ?? 20);
 const concurrency = Number(process.env.PACEPAL_STRESS_CONCURRENCY ?? 4);
+const selectedCases = new Set(
+  (process.env.PACEPAL_STRESS_CASES ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
+);
 const outputPath =
   process.env.PACEPAL_STRESS_OUTPUT ?? "/tmp/pacepal-planning-stress.json";
 const startedAt = new Date().toISOString();
@@ -213,7 +219,10 @@ const cases = [
   },
 ];
 
-const jobs = cases.flatMap((testCase) =>
+const activeCases = cases.filter(
+  (testCase) => selectedCases.size === 0 || selectedCases.has(testCase.id),
+);
+const jobs = activeCases.flatMap((testCase) =>
   Array.from({ length: repeat }, (_, index) => ({ testCase, run: index + 1 })),
 );
 const results = [];
@@ -277,28 +286,38 @@ const failuresByCode = Object.fromEntries(
     ),
   ).map(([code, entries]) => [code, entries.length]),
 );
+const rate = (passed, total) => (total === 0 ? null : passed / total);
 const metrics = {
   interactions: results.length,
-  firstAttemptSuccessRate: successful.length / results.length,
-  finalSuccessRate: successful.length / results.length,
-  schemaValidityRate:
-    results.filter((result) => result.schemaValid).length / results.length,
-  mutationCorrectnessRate:
-    mutations.filter((result) => result.passed).length / mutations.length,
-  dataIntegrityRate:
-    results.filter((result) => result.issues.length === 0).length /
+  firstAttemptSuccessRate: rate(successful.length, results.length),
+  finalSuccessRate: rate(successful.length, results.length),
+  schemaValidityRate: rate(
+    results.filter((result) => result.schemaValid).length,
     results.length,
-  noOpCorrectnessRate:
-    noOp.filter((result) => result.passed).length / noOp.length,
+  ),
+  mutationCorrectnessRate: rate(
+    mutations.filter((result) => result.passed).length,
+    mutations.length,
+  ),
+  dataIntegrityRate: rate(
+    results.filter((result) => result.issues.length === 0).length,
+    results.length,
+  ),
+  noOpCorrectnessRate: rate(
+    noOp.filter((result) => result.passed).length,
+    noOp.length,
+  ),
   errorClassificationAccuracy:
     failures.length === 0
       ? 1
       : failures.filter((result) =>
           validErrorCodes.has(result.response.body?.code),
         ).length / failures.length,
-  duplicateOperationRate:
+  duplicateOperationRate: rate(
     results.filter((result) => result.issues.includes("duplicate task ids"))
-      .length / results.length,
+      .length,
+    results.length,
+  ),
   failuresByCode,
   usage,
 };

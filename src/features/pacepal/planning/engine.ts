@@ -432,11 +432,11 @@ export function buildTaskSplitOperations(
   assignment: Assignment,
   proposal: TaskSplitProposal,
 ): PlanOperation[] {
-  const source = assignment.subtasks.find(
-    (task) => task.id === proposal.sourceTaskId,
-  );
+  const source = assignment.subtasks[proposal.sourceTaskIndex - 1];
   const issues: string[] = [];
-  if (!source) issues.push(`Unknown task id: ${proposal.sourceTaskId}.`);
+  if (!source) {
+    issues.push(`Unknown task index: ${proposal.sourceTaskIndex}.`);
+  }
   if (source?.status === "completed") {
     issues.push("Completed tasks cannot be split.");
   }

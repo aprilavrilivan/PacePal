@@ -377,7 +377,7 @@ describe("atomic plan operations", () => {
     );
     const operations = buildTaskSplitOperations(current, {
       language: "en",
-      sourceTaskId: source.id,
+      sourceTaskIndex: 4,
       titles: ["Find sources", "Extract evidence", "Record citations"],
     });
     const result = applyPlanOperations(current, operations, {

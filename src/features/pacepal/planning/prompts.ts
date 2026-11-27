@@ -144,11 +144,11 @@ export function requestsTaskCount(message: string) {
 export function taskSplitPrompt(assignment: Assignment, message: string) {
   return JSON.stringify({
     instruction:
-      "Identify the one existing unfinished task the user wants to split and return 2-8 concise, ordered, non-overlapping subtask titles. Return an existing task id exactly. Do not split a completed task. The backend will preserve status, duration, details, and dependencies.",
+      "Identify the one existing unfinished task the user wants to split and return its 1-based list index plus 2-8 concise, ordered, non-overlapping subtask titles. Do not split a completed task. The backend will map the index to its internal id and preserve status, duration, details, and dependencies.",
     userMessage: message,
     project: assignment.title,
-    tasks: assignment.subtasks.map((task) => ({
-      id: task.id,
+    tasks: assignment.subtasks.map((task, index) => ({
+      index: index + 1,
       title: task.title,
       description: task.description,
       estimatedMinutes: task.estimatedMinutes,

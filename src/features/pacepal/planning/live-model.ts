@@ -242,7 +242,7 @@ async function generateLiveTaskSplit(assignment: Assignment, message: string) {
         model: gateway(planningModel),
         output: Output.object({
           description:
-            "One existing task id and a concise ordered list of replacement task titles.",
+            "One existing task index and a concise ordered list of replacement task titles.",
           name: "pacepal_task_split",
           schema: taskSplitProposalSchema,
         }),
@@ -268,9 +268,7 @@ async function generateLiveTaskSplit(assignment: Assignment, message: string) {
     },
   });
   const operations = buildTaskSplitOperations(assignment, result.value);
-  const source = assignment.subtasks.find(
-    (task) => task.id === result.value.sourceTaskId,
-  )!;
+  const source = assignment.subtasks[result.value.sourceTaskIndex - 1]!;
   return {
     decision: {
       language: result.value.language,
