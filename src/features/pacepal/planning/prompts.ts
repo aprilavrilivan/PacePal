@@ -141,20 +141,77 @@ export function requestsTaskCount(message: string) {
   );
 }
 
-export function taskSplitPrompt(assignment: Assignment, message: string) {
+function splitMatchTerms(value: string) {
+  const normalized = value.toLowerCase();
+  const terms = new Set(
+    normalized.match(/[a-z0-9]{3,}|[\p{Script=Han}]{2,}/gu) ?? [],
+  );
+  for (const chunk of normalized.match(/[\p{Script=Han}]+/gu) ?? []) {
+    for (const size of [2, 3]) {
+      for (let index = 0; index <= chunk.length - size; index += 1) {
+        terms.add(chunk.slice(index, index + size));
+      }
+    }
+  }
+  return terms;
+}
+
+export function resolveTaskSplitSourceIndex(
+  assignment: Assignment,
+  message: string,
+) {
+  const ordinal = message.match(
+    /第\s*(\d{1,2}|[一二三四五六七八九十]{1,3})\s*(?:个|项|步)?(?:任务|步骤)?|(?:task|step)\s*#?\s*(\d{1,2})/i,
+  );
+  const explicitIndex = ordinal
+    ? chineseNumber(ordinal[1] ?? ordinal[2]!)
+    : null;
+  if (
+    explicitIndex &&
+    assignment.subtasks[explicitIndex - 1]?.status !== "completed"
+  ) {
+    return explicitIndex;
+  }
+
+  const messageTerms = splitMatchTerms(message);
+  const ranked = assignment.subtasks
+    .map((task, index) => {
+      if (task.status === "completed") return { index: index + 1, score: 0 };
+      const titleTerms = splitMatchTerms(task.title);
+      const detailTerms = splitMatchTerms(
+        `${task.description} ${task.completionCriteria}`,
+      );
+      const score = [...messageTerms].reduce(
+        (total, term) =>
+          total +
+          (titleTerms.has(term) ? 4 : 0) +
+          (detailTerms.has(term) ? 1 : 0),
+        0,
+      );
+      return { index: index + 1, score };
+    })
+    .sort((left, right) => right.score - left.score);
+  return ranked[0]?.score ? ranked[0].index : null;
+}
+
+export function taskSplitPrompt(
+  assignment: Assignment,
+  message: string,
+  sourceTaskIndex: number,
+) {
+  const task = assignment.subtasks[sourceTaskIndex - 1]!;
   return JSON.stringify({
     instruction:
-      "Identify the one existing unfinished task the user wants to split and return its 1-based list index plus 2-8 concise, ordered, non-overlapping subtask titles. Do not split a completed task. The backend will map the index to its internal id and preserve status, duration, details, and dependencies.",
+      "Return only 2-8 concise, ordered, non-overlapping replacement task titles for the selected task. The backend has already selected the task and will preserve its status, total duration, details, and dependencies.",
     userMessage: message,
     project: assignment.title,
-    tasks: assignment.subtasks.map((task, index) => ({
-      index: index + 1,
+    task: {
       title: task.title,
       description: task.description,
+      completionCriteria: task.completionCriteria,
       estimatedMinutes: task.estimatedMinutes,
-      status: task.status,
       maximumParts: Math.min(8, Math.floor(task.estimatedMinutes / 5)),
-    })),
+    },
   });
 }
 

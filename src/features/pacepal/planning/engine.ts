@@ -431,11 +431,12 @@ export function buildTaskGroupingOperations(
 export function buildTaskSplitOperations(
   assignment: Assignment,
   proposal: TaskSplitProposal,
+  sourceTaskIndex: number,
 ): PlanOperation[] {
-  const source = assignment.subtasks[proposal.sourceTaskIndex - 1];
+  const source = assignment.subtasks[sourceTaskIndex - 1];
   const issues: string[] = [];
   if (!source) {
-    issues.push(`Unknown task index: ${proposal.sourceTaskIndex}.`);
+    issues.push(`Unknown task index: ${sourceTaskIndex}.`);
   }
   if (source?.status === "completed") {
     issues.push("Completed tasks cannot be split.");

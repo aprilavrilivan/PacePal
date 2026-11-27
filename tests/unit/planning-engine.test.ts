@@ -375,11 +375,13 @@ describe("atomic plan operations", () => {
       (total, task) => total + task.estimatedMinutes,
       0,
     );
-    const operations = buildTaskSplitOperations(current, {
-      language: "en",
-      sourceTaskIndex: 4,
-      titles: ["Find sources", "Extract evidence", "Record citations"],
-    });
+    const operations = buildTaskSplitOperations(
+      current,
+      {
+        titles: ["Find sources", "Extract evidence", "Record citations"],
+      },
+      4,
+    );
     const result = applyPlanOperations(current, operations, {
       language: "en",
       summary: "Split one task.",

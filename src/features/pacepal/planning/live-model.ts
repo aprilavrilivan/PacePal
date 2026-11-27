@@ -34,6 +34,7 @@ import {
   requestedTaskGroupingCount,
   requestsTaskCount,
   requestsTaskSplit,
+  resolveTaskSplitSourceIndex,
   taskGroupingPrompt,
   taskSplitPrompt,
 } from "@/features/pacepal/planning/prompts";
@@ -233,6 +234,30 @@ async function generateLiveTaskGrouping(
 }
 
 async function generateLiveTaskSplit(assignment: Assignment, message: string) {
+  const sourceTaskIndex = resolveTaskSplitSourceIndex(assignment, message);
+  const language: "zh" | "en" = /[\p{Script=Han}]/u.test(message) ? "zh" : "en";
+  if (!sourceTaskIndex) {
+    return {
+      decision: {
+        language,
+        intent: "task_breakdown" as const,
+        assistantMessage:
+          language === "zh"
+            ? "我还不能确定你想拆分哪一个任务，请直接告诉我任务名称。"
+            : "I cannot tell which task you want to split yet. Please name the task.",
+        confirmation: "not_required" as const,
+        operations: [],
+      },
+      model: planningModel,
+      usage: {
+        cacheReadTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        totalTokens: 0,
+      },
+    };
+  }
   const result = await runPlanningCall({
     generate: async (abortSignal) => {
       const response = await generateText({
@@ -241,21 +266,24 @@ async function generateLiveTaskSplit(assignment: Assignment, message: string) {
         maxRetries: 0,
         model: gateway(planningModel),
         output: Output.object({
-          description:
-            "One existing task index and a concise ordered list of replacement task titles.",
+          description: "A concise ordered list of replacement task titles.",
           name: "pacepal_task_split",
           schema: taskSplitProposalSchema,
         }),
         reasoning: "low",
-        prompt: taskSplitPrompt(assignment, message),
+        prompt: taskSplitPrompt(assignment, message, sourceTaskIndex),
       });
       return { usage: response.usage, value: response.output };
     },
     validate: (value) => {
       try {
-        const operations = buildTaskSplitOperations(assignment, value);
+        const operations = buildTaskSplitOperations(
+          assignment,
+          value,
+          sourceTaskIndex,
+        );
         applyPlanOperations(assignment, operations, {
-          language: value.language,
+          language,
           summary: "Validate task split.",
           now: new Date(0),
         });
@@ -267,14 +295,18 @@ async function generateLiveTaskSplit(assignment: Assignment, message: string) {
       }
     },
   });
-  const operations = buildTaskSplitOperations(assignment, result.value);
-  const source = assignment.subtasks[result.value.sourceTaskIndex - 1]!;
+  const operations = buildTaskSplitOperations(
+    assignment,
+    result.value,
+    sourceTaskIndex,
+  );
+  const source = assignment.subtasks[sourceTaskIndex - 1]!;
   return {
     decision: {
-      language: result.value.language,
+      language,
       intent: "task_breakdown" as const,
       assistantMessage:
-        result.value.language === "zh"
+        language === "zh"
           ? `已将“${source.title}”拆成 ${result.value.titles.length} 步：${result.value.titles.join("、")}。原任务的进度、总耗时和依赖均已保留。`
           : `I split “${source.title}” into ${result.value.titles.length} steps: ${result.value.titles.join(", ")}. Its progress, total duration, and dependencies were preserved.`,
       confirmation: "not_required" as const,

@@ -150,8 +150,6 @@ export const taskGroupingProposalSchema = z.object({
 });
 
 export const taskSplitProposalSchema = z.object({
-  language: planningLanguageSchema,
-  sourceTaskIndex: z.number().int().positive().max(50),
   titles: z.array(z.string().trim().min(1).max(160)).min(2).max(8),
 });
 
