@@ -182,13 +182,12 @@ export function CalendarMonthView({
                 date.getFullYear() === visibleMonth.getFullYear();
               const isToday = key === todayKey;
               const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-              const visibleEntries = entries.slice(0, 3);
 
               return (
                 <div
-                  className={`min-h-[132px] p-2.5 ${
+                  className={`flex h-[180px] min-w-0 flex-col p-2.5 ${
                     isWeekend ? "bg-slate-50/90" : "bg-white"
-                  } ${isCurrentMonth ? "" : "opacity-45"}`}
+                  }`}
                   data-date={key}
                   key={key}
                 >
@@ -197,7 +196,7 @@ export function CalendarMonthView({
                       className={`flex size-7 items-center justify-center rounded-full text-sm font-semibold ${
                         isToday
                           ? "bg-[#5b55df] text-white"
-                          : isWeekend
+                          : !isCurrentMonth || isWeekend
                             ? "text-slate-400"
                             : "text-slate-700"
                       }`}
@@ -207,8 +206,17 @@ export function CalendarMonthView({
                     </time>
                   </div>
 
-                  <div className="space-y-1.5">
-                    {visibleEntries.map((entry) => {
+                  <div
+                    aria-label={
+                      entries.length > 0
+                        ? `${date.getMonth() + 1}月${date.getDate()}日计划，共${entries.length}项`
+                        : undefined
+                    }
+                    className="min-h-0 flex-1 [scrollbar-width:thin] [scrollbar-gutter:stable] space-y-1.5 overflow-y-auto overscroll-contain pr-1"
+                    data-calendar-events={key}
+                    tabIndex={entries.length > 0 ? 0 : undefined}
+                  >
+                    {entries.map((entry) => {
                       const colors = eventColors[entry.colorIndex];
                       const completed = entry.status === "completed";
                       return (
@@ -247,11 +255,6 @@ export function CalendarMonthView({
                         </button>
                       );
                     })}
-                    {entries.length > visibleEntries.length ? (
-                      <p className="px-1 text-xs font-semibold text-slate-500">
-                        还有 {entries.length - visibleEntries.length} 项
-                      </p>
-                    ) : null}
                   </div>
                 </div>
               );

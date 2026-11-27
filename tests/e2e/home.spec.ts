@@ -464,6 +464,92 @@ test("keeps multiple assignments and lets the user switch between them", async (
   await expect(page.getByText("还没有任务拆解")).toBeVisible();
 });
 
+test("scrolls through every calendar item and distinguishes weekends from adjacent months", async ({
+  page,
+}) => {
+  const subtasks = fixtureTasks().slice(0, 5);
+  await page.goto("/");
+  const todayKey = await page.evaluate((tasks) => {
+    const today = new Date();
+    const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    window.localStorage.setItem(
+      "pacepal:app-state:v1",
+      JSON.stringify({
+        assignments: [
+          {
+            availability: { dailyMinutes: 60, preferredTime: "09:00" },
+            chatMessages: [],
+            checkIn: { availableMinutes: 30, energy: "medium" },
+            createdAt: new Date().toISOString(),
+            deadline: `${key}T18:00`,
+            deliverable: "",
+            id: "calendar-scroll-assignment",
+            priority: "medium",
+            requirements: "",
+            schedule: tasks.map((task, index) => ({
+              date: key,
+              durationMinutes: 30,
+              id: `calendar-block-${index + 1}`,
+              locked: false,
+              startTime: `09:${String(index * 10).padStart(2, "0")}`,
+              subtaskId: task.id,
+            })),
+            scheduleNotice: "",
+            status: "scheduled",
+            subtasks: tasks,
+            title: "日历滚动测试",
+            unscheduledMinutes: 0,
+          },
+        ],
+        selectedAssignmentId: "calendar-scroll-assignment",
+        version: 2,
+      }),
+    );
+    return key;
+  }, subtasks);
+  await page.reload();
+  await page.getByRole("button", { exact: true, name: "日历" }).click();
+
+  const events = page.locator(`[data-calendar-events="${todayKey}"]`);
+  await expect(events.locator("button")).toHaveCount(5);
+  await expect(page.getByText(/还有 \d+ 项/)).toHaveCount(0);
+  await expect
+    .poll(() =>
+      events.evaluate((element) => element.scrollHeight > element.clientHeight),
+    )
+    .toBe(true);
+
+  await events.hover();
+  await page.mouse.wheel(0, 180);
+  await expect
+    .poll(() => events.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+
+  const cellStyles = await page.locator("[data-date]").evaluateAll((cells) => {
+    const currentMonth = new Date().getMonth();
+    const values = cells.map((cell) => {
+      const date = new Date(`${cell.getAttribute("data-date")}T12:00:00`);
+      return {
+        cellClass: cell.className,
+        currentMonth: date.getMonth() === currentMonth,
+        numberClass: cell.querySelector("time")?.className ?? "",
+        weekend: date.getDay() === 0 || date.getDay() === 6,
+      };
+    });
+    return {
+      adjacentWeekday: values.find(
+        (value) => !value.currentMonth && !value.weekend,
+      ),
+      weekend: values.find((value) => value.currentMonth && value.weekend),
+    };
+  });
+
+  expect(cellStyles.weekend?.cellClass).toContain("bg-slate-50/90");
+  expect(cellStyles.adjacentWeekday?.cellClass).toContain("bg-white");
+  expect(cellStyles.adjacentWeekday?.cellClass).not.toContain("opacity-45");
+  expect(cellStyles.adjacentWeekday?.numberClass).toContain("text-slate-400");
+});
+
 test("lets the user manually create detailed tasks before chatting with AI", async ({
   page,
 }) => {
