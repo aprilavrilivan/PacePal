@@ -5,8 +5,12 @@ const failurePatterns = [
   ],
   ["timeout", /abort|timeout|timed out|deadline exceeded/i],
   [
+    "network",
+    /connection reset|econnreset|network|fetch failed|http2|framing layer|socket hang up/i,
+  ],
+  [
     "invalid-output",
-    /output|schema|parse|json|validation|zod|dependency|operation/i,
+    /output|schema|parse|json|validation|zod|dependency|operation|empty response|no object generated/i,
   ],
   [
     "authentication",
@@ -27,12 +31,65 @@ const failurePatterns = [
 ] as const;
 
 export type PlanningFailureReason =
-  (typeof failurePatterns)[number][0] | "provider-error";
+  | (typeof failurePatterns)[number][0]
+  | "invalid-dependencies"
+  | "provider-error";
 
 export function planningFailureMessage(reason: PlanningFailureReason) {
-  return reason === "invalid-output"
-    ? "本次 AI 生成结果未通过校验，请重试。"
-    : "当前 AI 模型不可用，请稍后重试。";
+  if (reason === "quota") return "AI 请求过于频繁，请稍后重试。";
+  if (reason === "timeout") return "AI 响应超时，请重试。";
+  if (reason === "network") return "连接中断，请检查网络后重试。";
+  if (reason === "invalid-output") {
+    return "AI 返回的任务数据格式有误，未保存任何更改。";
+  }
+  if (reason === "invalid-dependencies") {
+    return "AI 提议的任务依赖无效，未保存任何更改。";
+  }
+  return "AI 服务暂时不可用，请稍后重试。";
+}
+
+export function planningFailureCode(reason: PlanningFailureReason) {
+  if (reason === "quota") return "rate_limited";
+  if (reason === "timeout") return "timeout";
+  if (reason === "network") return "network_error";
+  if (reason === "invalid-output") return "invalid_output";
+  if (reason === "invalid-dependencies") return "invalid_dependencies";
+  return "provider_unavailable";
+}
+
+export function planningFailureStatus(reason: PlanningFailureReason) {
+  if (reason === "quota") return 429;
+  if (reason === "timeout") return 504;
+  if (["invalid-output", "invalid-dependencies"].includes(reason)) return 422;
+  return 503;
+}
+
+export function planningFailureRetryable(reason: PlanningFailureReason) {
+  return !["authentication", "configuration", "model-unavailable"].includes(
+    reason,
+  );
+}
+
+export function planningFailure(reason: PlanningFailureReason) {
+  return {
+    body: {
+      code: planningFailureCode(reason),
+      error: planningFailureMessage(reason),
+      reason,
+      retryable: planningFailureRetryable(reason),
+    },
+    status: planningFailureStatus(reason),
+  };
+}
+
+export function classifyPlanValidation(
+  issues: string[],
+): PlanningFailureReason {
+  return issues.some((issue) =>
+    /dependency|circular|cycle|self-reference/i.test(issue),
+  )
+    ? "invalid-dependencies"
+    : "invalid-output";
 }
 
 function errorText(error: unknown, depth = 0): string {
@@ -62,10 +119,10 @@ export function classifyPlanningFailure(error: unknown): PlanningFailureReason {
   );
 }
 
-export class PlanningProviderError extends Error {
+export class PlanningRequestError extends Error {
   constructor(readonly reason: PlanningFailureReason) {
-    super("The planning model is unavailable.");
-    this.name = "PlanningProviderError";
+    super(`Planning request failed: ${reason}.`);
+    this.name = "PlanningRequestError";
   }
 }
 

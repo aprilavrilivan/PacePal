@@ -62,12 +62,23 @@ export const checkInSchema = z.object({
   energy: energySchema,
 });
 
+export const chatErrorCodeSchema = z.enum([
+  "model_unavailable",
+  "network_error",
+  "provider_unavailable",
+  "rate_limited",
+  "timeout",
+  "invalid_output",
+  "invalid_dependencies",
+  "concurrent_modification",
+]);
+
 export const chatMessageSchema = z.object({
   id: z.string().min(1),
   role: z.enum(["user", "assistant"]),
   content: z.string().trim().min(1),
   createdAt: z.string().min(1),
-  errorCode: z.enum(["model_unavailable"]).optional(),
+  errorCode: chatErrorCodeSchema.optional(),
   retryForMessageId: z.string().min(1).optional(),
 });
 
@@ -118,6 +129,7 @@ export type ScheduleBlock = z.infer<typeof scheduleBlockSchema>;
 export type CheckIn = z.infer<typeof checkInSchema>;
 export type Energy = z.infer<typeof energySchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
+export type ChatErrorCode = z.infer<typeof chatErrorCodeSchema>;
 export type PlanChange = z.infer<typeof planChangeSchema>;
 export type Assignment = z.infer<typeof assignmentSchema>;
 export type AppState = z.infer<typeof appStateSchema>;

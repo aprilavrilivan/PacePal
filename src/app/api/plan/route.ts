@@ -1,9 +1,11 @@
 import { ZodError } from "zod";
 
 import { assignmentInputSchema } from "@/features/pacepal/model";
+import { PlanValidationError } from "@/features/pacepal/planning/engine";
 import {
-  planningFailureMessage,
-  PlanningProviderError,
+  classifyPlanValidation,
+  planningFailure,
+  PlanningRequestError,
 } from "@/features/pacepal/planning/provider-error";
 import { createTaskPlan } from "@/features/pacepal/planning/service";
 
@@ -18,15 +20,13 @@ export async function POST(request: Request) {
     if (error instanceof ZodError || error instanceof SyntaxError) {
       return Response.json({ error: "Invalid assignment." }, { status: 400 });
     }
-    if (error instanceof PlanningProviderError) {
-      return Response.json(
-        {
-          code: "model_unavailable",
-          error: planningFailureMessage(error.reason),
-          reason: error.reason,
-        },
-        { status: 503 },
-      );
+    if (error instanceof PlanningRequestError) {
+      const failure = planningFailure(error.reason);
+      return Response.json(failure.body, { status: failure.status });
+    }
+    if (error instanceof PlanValidationError) {
+      const failure = planningFailure(classifyPlanValidation(error.issues));
+      return Response.json(failure.body, { status: failure.status });
     }
     console.error("Unexpected plan API failure", error);
     return Response.json({ error: "Planning failed." }, { status: 500 });

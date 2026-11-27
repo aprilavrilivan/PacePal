@@ -23,6 +23,10 @@ export const draftTaskSchema = z.object({
   dependencies: z.array(z.string().trim().min(1)).max(12),
 });
 
+const mergedTaskSchema = draftTaskSchema.extend({
+  estimatedMinutes: z.number().int().min(5).max(525600),
+});
+
 export const draftPhaseSchema = z.object({
   id: z.string().trim().min(1).max(80),
   title: z.string().trim().min(1).max(120),
@@ -90,8 +94,8 @@ export const planOperationSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("merge_tasks"),
-    taskIds: z.array(z.string().trim().min(1)).min(2).max(8),
-    task: draftTaskSchema.extend({ phase: z.string().trim().min(1).max(120) }),
+    taskIds: z.array(z.string().trim().min(1)).min(2).max(50),
+    task: mergedTaskSchema.extend({ phase: z.string().trim().min(1).max(120) }),
   }),
   z.object({
     type: z.literal("reorder_tasks"),
@@ -130,6 +134,19 @@ export const refinementDecisionSchema = z.object({
   assistantMessage: z.string().trim().min(1).max(4000),
   confirmation: z.enum(["not_required", "requested", "confirmed"]),
   operations: z.array(planOperationSchema).max(64),
+});
+
+export const taskGroupingProposalSchema = z.object({
+  language: planningLanguageSchema,
+  groups: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(160),
+        sourceTaskIds: z.array(z.string().trim().min(1)).min(1).max(50),
+      }),
+    )
+    .min(1)
+    .max(50),
 });
 
 export const refinementRequestSchema = z.object({
@@ -202,6 +219,7 @@ export type DraftPhase = z.infer<typeof draftPhaseSchema>;
 export type InitialPlanDecision = z.infer<typeof initialPlanDecisionSchema>;
 export type PlanOperation = z.infer<typeof planOperationSchema>;
 export type RefinementDecision = z.infer<typeof refinementDecisionSchema>;
+export type TaskGroupingProposal = z.infer<typeof taskGroupingProposalSchema>;
 export type PlanSnapshot = z.infer<typeof planSnapshotSchema>;
 export type ModelUsage = z.infer<typeof modelUsageSchema>;
 export type PlanApiResponse = z.infer<typeof planApiResponseSchema>;

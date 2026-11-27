@@ -6,18 +6,22 @@ import type { Assignment, AssignmentInput } from "@/features/pacepal/model";
 import {
   initialPlanDecisionSchema,
   refinementDecisionSchema,
+  taskGroupingProposalSchema,
   type InitialPlanDecision,
   type ModelUsage,
   type RefinementDecision,
 } from "@/features/pacepal/planning/contracts";
 import {
   applyPlanOperations,
+  buildTaskGroupingOperations,
+  normalizeTaskGrouping,
   PlanValidationError,
   validateDraftPhases,
 } from "@/features/pacepal/planning/engine";
 import {
+  classifyPlanValidation,
   classifyPlanningFailure,
-  PlanningProviderError,
+  PlanningRequestError,
   safeProviderError,
 } from "@/features/pacepal/planning/provider-error";
 import {
@@ -25,8 +29,9 @@ import {
   initialPlanUserPrompt,
   refinementSystemPrompt,
   refinementUserPrompt,
+  requestedTaskGroupingCount,
+  taskGroupingPrompt,
 } from "@/features/pacepal/planning/prompts";
-import { assistantMessageValidationError } from "@/features/pacepal/planning/response-quality";
 import { withPlanningTimeout } from "@/features/pacepal/planning/timeout";
 
 export const planningModel = "deepseek/deepseek-v4.1-flash-1017";
@@ -105,11 +110,6 @@ function decisionValidationError(
   decision: RefinementDecision,
   assignment: Assignment,
 ) {
-  const messageIssue = assistantMessageValidationError(
-    decision.assistantMessage,
-  );
-  if (messageIssue) return messageIssue;
-
   if (decision.confirmation === "requested") {
     // The service discards every proposed operation until the user confirms.
     return "";
@@ -151,12 +151,80 @@ async function runPlanningCall<T>(options: {
     if (issue) throw new PlanValidationError([issue]);
     return { usage: modelUsage(result.usage), value: result.value };
   } catch (error) {
-    const reason = classifyPlanningFailure(error);
+    const reason =
+      error instanceof PlanValidationError
+        ? classifyPlanValidation(error.issues)
+        : classifyPlanningFailure(error);
     console.error(
       `Planning model ${planningModel} failed (${reason}). ${safeProviderError(error)}`,
     );
-    throw new PlanningProviderError(reason);
+    throw new PlanningRequestError(reason);
   }
+}
+
+function groupingMessage(
+  language: "zh" | "en",
+  beforeCount: number,
+  titles: string[],
+) {
+  return language === "zh"
+    ? `已将 ${beforeCount} 个任务整理为 ${titles.length} 步：${titles.join("、")}。原有工作内容、状态和耗时均已保留，依赖关系由系统重新生成。`
+    : `I grouped the ${beforeCount} tasks into ${titles.length} steps: ${titles.join(", ")}. The original work, progress, and durations were preserved, and dependencies were rebuilt by the system.`;
+}
+
+async function generateLiveTaskGrouping(
+  assignment: Assignment,
+  targetCount: number,
+) {
+  const result = await runPlanningCall({
+    generate: async (abortSignal) => {
+      const response = await generateText({
+        abortSignal,
+        maxOutputTokens: 4000,
+        maxRetries: 0,
+        model: gateway(planningModel),
+        output: Output.object({
+          description:
+            "A complete mapping from existing task ids to a fixed number of semantic groups.",
+          name: "pacepal_task_grouping",
+          schema: taskGroupingProposalSchema,
+        }),
+        reasoning: "low",
+        prompt: taskGroupingPrompt(assignment, targetCount),
+      });
+      return { usage: response.usage, value: response.output };
+    },
+    validate: (value) => {
+      try {
+        normalizeTaskGrouping(assignment, value, targetCount);
+        return "";
+      } catch (error) {
+        return error instanceof PlanValidationError
+          ? error.issues.join(" | ")
+          : "The generated grouping is invalid.";
+      }
+    },
+  });
+  const groups = normalizeTaskGrouping(assignment, result.value, targetCount);
+  return {
+    decision: {
+      language: result.value.language,
+      intent: "plan_modification" as const,
+      assistantMessage: groupingMessage(
+        result.value.language,
+        assignment.subtasks.length,
+        groups.map((group) => group.title),
+      ),
+      confirmation: "confirmed" as const,
+      operations: buildTaskGroupingOperations(
+        assignment,
+        result.value,
+        targetCount,
+      ),
+    },
+    model: planningModel,
+    usage: result.usage,
+  };
 }
 
 export async function generateLiveInitialPlan(
@@ -223,6 +291,11 @@ export async function generateLiveRefinement(
   model: string;
   usage: ModelUsage;
 }> {
+  const groupingCount = requestedTaskGroupingCount(message);
+  if (groupingCount !== null && groupingCount < assignment.subtasks.length) {
+    return generateLiveTaskGrouping(assignment, groupingCount);
+  }
+
   const result = await runPlanningCall({
     generate: async (abortSignal) => {
       const response = await generateText({

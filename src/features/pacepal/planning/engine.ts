@@ -11,6 +11,7 @@ import type {
   InitialPlanDecision,
   PlanOperation,
   PlanSnapshot,
+  TaskGroupingProposal,
 } from "@/features/pacepal/planning/contracts";
 import { planSnapshotSchema } from "@/features/pacepal/planning/contracts";
 
@@ -315,6 +316,117 @@ function statusAfterMerge(tasks: Subtask[]): Subtask["status"] {
   return "todo";
 }
 
+const priorityRank = { low: 0, medium: 1, high: 2 } as const;
+const difficultyRank = { low: 0, medium: 1, high: 2 } as const;
+
+function strongestValue<T extends keyof typeof priorityRank>(
+  values: T[],
+  rank: Record<T, number>,
+) {
+  return values.reduce((best, value) =>
+    rank[value] > rank[best] ? value : best,
+  );
+}
+
+function joinedText(values: string[], maxLength: number) {
+  const result = [...new Set(values)].join("；");
+  return result.length <= maxLength
+    ? result
+    : `${result.slice(0, maxLength - 1)}…`;
+}
+
+export function normalizeTaskGrouping(
+  assignment: Assignment,
+  proposal: TaskGroupingProposal,
+  targetCount: number,
+) {
+  if (proposal.groups.length !== targetCount) {
+    throw new PlanValidationError([
+      `Expected ${targetCount} task groups, received ${proposal.groups.length}.`,
+    ]);
+  }
+
+  const taskById = new Map(assignment.subtasks.map((task) => [task.id, task]));
+  const sourceIds = proposal.groups.flatMap((group) => group.sourceTaskIds);
+  const duplicates = duplicateValues(sourceIds);
+  const unknown = sourceIds.filter((id) => !taskById.has(id));
+  const missing = assignment.subtasks
+    .map((task) => task.id)
+    .filter((id) => !sourceIds.includes(id));
+
+  const issues = [
+    ...duplicates.map((id) => `Task ${id} appears in more than one group.`),
+    ...unknown.map((id) => `Unknown task id: ${id}.`),
+    ...missing.map((id) => `Task ${id} is not included in any group.`),
+  ];
+
+  for (const group of proposal.groups) {
+    if (
+      group.sourceTaskIds.length > 1 &&
+      group.sourceTaskIds.some((id) => taskById.get(id)?.status === "completed")
+    ) {
+      issues.push("Completed tasks must remain separate during regrouping.");
+    }
+  }
+  if (issues.length > 0) throw new PlanValidationError(issues);
+
+  const taskIndex = new Map(
+    assignment.subtasks.map((task, index) => [task.id, index]),
+  );
+  return [...proposal.groups].sort(
+    (left, right) =>
+      Math.min(...left.sourceTaskIds.map((id) => taskIndex.get(id)!)) -
+      Math.min(...right.sourceTaskIds.map((id) => taskIndex.get(id)!)),
+  );
+}
+
+export function buildTaskGroupingOperations(
+  assignment: Assignment,
+  proposal: TaskGroupingProposal,
+  targetCount: number,
+): PlanOperation[] {
+  const groups = normalizeTaskGrouping(assignment, proposal, targetCount);
+  const taskById = new Map(assignment.subtasks.map((task) => [task.id, task]));
+  const operations: PlanOperation[] = groups.flatMap((group, index) => {
+    if (group.sourceTaskIds.length === 1) return [];
+    const tasks = group.sourceTaskIds.map((id) => taskById.get(id)!);
+    return [
+      {
+        type: "merge_tasks" as const,
+        taskIds: group.sourceTaskIds,
+        task: {
+          tempId: `new-group-${index + 1}`,
+          title: group.title,
+          description: joinedText(
+            tasks.map((task) => task.description),
+            1200,
+          ),
+          completionCriteria: joinedText(
+            tasks.map((task) => task.completionCriteria),
+            600,
+          ),
+          estimatedMinutes: tasks.reduce(
+            (total, task) => total + task.estimatedMinutes,
+            0,
+          ),
+          difficulty: strongestValue(
+            tasks.map((task) => task.difficulty),
+            difficultyRank,
+          ),
+          priority: strongestValue(
+            tasks.map((task) => task.taskPriority ?? assignment.priority),
+            priorityRank,
+          ),
+          dependencies: [],
+          phase: tasks[0]!.phase ?? "计划执行",
+        },
+      },
+    ];
+  });
+
+  return operations.length > 0 ? [...operations, { type: "reschedule" }] : [];
+}
+
 function uniqueReferences(values: string[]) {
   return [...new Set(values)];
 }
@@ -523,6 +635,16 @@ export function applyPlanOperations(
         (total, task) => total + task.actualMinutes,
         0,
       );
+      if (merged.status === "in_progress") {
+        merged.activeSince =
+          targets.find((task) => task.status === "in_progress")?.activeSince ??
+          null;
+      }
+      if (merged.status === "postponed") {
+        merged.postponedUntil =
+          targets.find((task) => task.status === "postponed")?.postponedUntil ??
+          null;
+      }
       const firstIndex = Math.min(
         ...taskIds.map((id) => subtasks.findIndex((task) => task.id === id)),
       );

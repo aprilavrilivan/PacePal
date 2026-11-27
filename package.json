@@ -18,7 +18,8 @@
     "test": "vitest",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:list": "playwright test --list"
+    "test:e2e:list": "playwright test --list",
+    "test:production:stress": "node scripts/stress-production-planning.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

@@ -1,4 +1,9 @@
-import type { Assignment, AssignmentInput } from "@/features/pacepal/model";
+import {
+  chatErrorCodeSchema,
+  type Assignment,
+  type AssignmentInput,
+  type ChatErrorCode,
+} from "@/features/pacepal/model";
 import {
   planApiResponseSchema,
   refinementApiResponseSchema,
@@ -8,14 +13,16 @@ import {
 } from "@/features/pacepal/planning/contracts";
 
 type PlanningClientErrorOptions = {
-  code: string | null;
+  code: ChatErrorCode | null;
   reason: string | null;
+  retryable: boolean;
   status: number;
 };
 
 export class PlanningClientError extends Error {
-  readonly code: string | null;
+  readonly code: ChatErrorCode | null;
   readonly reason: string | null;
+  readonly retryable: boolean;
   readonly status: number;
 
   constructor(message: string, options: PlanningClientErrorOptions) {
@@ -23,6 +30,7 @@ export class PlanningClientError extends Error {
     this.name = "PlanningClientError";
     this.code = options.code;
     this.reason = options.reason;
+    this.retryable = options.retryable;
     this.status = options.status;
   }
 }
@@ -33,12 +41,15 @@ async function planningError(response: Response) {
       code?: unknown;
       error?: unknown;
       reason?: unknown;
+      retryable?: unknown;
     };
+    const code = chatErrorCodeSchema.safeParse(value.code);
     return new PlanningClientError(
       typeof value.error === "string" ? value.error : "Request failed.",
       {
-        code: typeof value.code === "string" ? value.code : null,
+        code: code.success ? code.data : null,
         reason: typeof value.reason === "string" ? value.reason : null,
+        retryable: value.retryable === true,
         status: response.status,
       },
     );
@@ -46,6 +57,7 @@ async function planningError(response: Response) {
     return new PlanningClientError("Request failed.", {
       code: null,
       reason: null,
+      retryable: false,
       status: response.status,
     });
   }
@@ -59,9 +71,10 @@ async function postPlanningRequest(url: string, body: unknown) {
       method: "POST",
     });
   } catch {
-    throw new PlanningClientError("当前 AI 模型不可用，请稍后重试。", {
-      code: "model_unavailable",
+    throw new PlanningClientError("连接中断，请检查网络后重试。", {
+      code: "network_error",
       reason: "network",
+      retryable: true,
       status: 0,
     });
   }

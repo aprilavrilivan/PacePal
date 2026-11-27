@@ -22,23 +22,25 @@ describe("planning client errors", () => {
       vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
-            code: "model_unavailable",
-            error: "当前 AI 模型不可用，请稍后重试。",
+            code: "timeout",
+            error: "AI 响应超时，请重试。",
             reason: "timeout",
+            retryable: true,
           }),
           {
             headers: { "content-type": "application/json" },
-            status: 503,
+            status: 504,
           },
         ),
       ),
     );
 
     await expect(requestPlan(assignment)).rejects.toMatchObject({
-      code: "model_unavailable",
-      message: "当前 AI 模型不可用，请稍后重试。",
+      code: "timeout",
+      message: "AI 响应超时，请重试。",
       reason: "timeout",
-      status: 503,
+      retryable: true,
+      status: 504,
     });
   });
 
@@ -50,8 +52,9 @@ describe("planning client errors", () => {
     );
     expect(error).toBeInstanceOf(PlanningClientError);
     expect(error).toMatchObject({
-      code: "model_unavailable",
+      code: "network_error",
       reason: "network",
+      retryable: true,
       status: 0,
     });
   });

@@ -387,9 +387,10 @@ test("creates a project shell, generates its first breakdown in chat, and persis
     if (retryRequestCount === 1) {
       await route.fulfill({
         body: JSON.stringify({
-          code: "model_unavailable",
-          error: "当前 AI 模型不可用，请稍后重试。",
+          code: "provider_unavailable",
+          error: "AI 服务暂时不可用，请稍后重试。",
           reason: "unavailable",
+          retryable: true,
         }),
         contentType: "application/json",
         status: 503,
@@ -402,7 +403,7 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   await page.getByLabel("给 AI 助手的消息").fill(retryPrompt);
   await page.getByRole("button", { name: "发送" }).click();
   await expect(
-    page.getByText("当前 AI 模型不可用，请稍后重试。 你的计划没有变化。"),
+    page.getByText("AI 服务暂时不可用，请稍后重试。 你的计划没有变化。"),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
   await expect(page.getByText(retryPrompt, { exact: true })).toHaveCount(1);
@@ -411,7 +412,7 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   await expect.poll(() => retryRequestCount, { timeout: 3_000 }).toBe(2);
   await expect(page.getByRole("button", { name: "重试" })).toHaveCount(0);
   await expect(
-    page.getByText("当前 AI 模型不可用，请稍后重试。 你的计划没有变化。"),
+    page.getByText("AI 服务暂时不可用，请稍后重试。 你的计划没有变化。"),
   ).toHaveCount(0);
   await expect(page.getByText(retryPrompt, { exact: true })).toHaveCount(1);
   await expect(page.getByText("正在分析进度与依赖…")).toHaveCount(0);
@@ -628,8 +629,10 @@ test("shows model unavailable without creating a fallback plan", async ({
   await page.route("**/api/plan", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
-        code: "model_unavailable",
-        error: "当前 AI 模型不可用，请稍后重试。",
+        code: "provider_unavailable",
+        error: "AI 服务暂时不可用，请稍后重试。",
+        reason: "unavailable",
+        retryable: true,
       }),
       contentType: "application/json",
       status: 503,
@@ -655,7 +658,7 @@ test("shows model unavailable without creating a fallback plan", async ({
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect(
-    page.getByText("当前 AI 模型不可用，请稍后重试。 你的计划没有变化。"),
+    page.getByText("AI 服务暂时不可用，请稍后重试。 你的计划没有变化。"),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
   await expect(page.getByText("还没有任务拆解")).toBeVisible();

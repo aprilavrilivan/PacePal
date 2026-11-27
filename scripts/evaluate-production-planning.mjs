@@ -39,6 +39,7 @@ function request(path, payload) {
     [
       "-x",
       proxy,
+      "--http1.1",
       "-sS",
       "--max-time",
       "100",

@@ -200,7 +200,7 @@ function initialPlanningRequirements(
 ) {
   const conversation = [
     ...messages
-      .filter((message) => message.errorCode !== "model_unavailable")
+      .filter((message) => !message.errorCode)
       .slice(-8)
       .map((message) => ({
         role: message.role === "user" ? "用户" : "PacePal",
@@ -213,6 +213,18 @@ function initialPlanningRequirements(
     "以下是用户为这个项目提供的规划信息：",
     ...conversation.map(({ role, content }) => `${role}：${content}`),
   ].join("\n");
+}
+
+function planningFingerprint(assignment: Assignment) {
+  return JSON.stringify({
+    title: assignment.title,
+    requirements: assignment.requirements,
+    deliverable: assignment.deliverable,
+    deadline: assignment.deadline,
+    priority: assignment.priority,
+    availability: assignment.availability,
+    subtasks: assignment.subtasks,
+  });
 }
 
 export function PacePalApp() {
@@ -237,6 +249,8 @@ export function PacePalApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [chatDraft, setChatDraft] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  const appStateRef = useRef(appState);
+  const chatRequestInFlightRef = useRef(false);
   const [taskAdjustmentMode, setTaskAdjustmentMode] =
     useState<TaskAdjustmentMode>("ai");
   const draggedTaskIdRef = useRef<string | null>(null);
@@ -260,6 +274,10 @@ export function PacePalApp() {
   const todayPlanDragRef = useRef<TodayPlanDragState | null>(null);
   const suppressTodayPlanClickRef = useRef(false);
   const userId = user?.id ?? null;
+
+  useEffect(() => {
+    appStateRef.current = appState;
+  }, [appState]);
 
   const hasRunningTask = appState.assignments.some((item) =>
     item.subtasks.some(
@@ -462,12 +480,14 @@ export function PacePalApp() {
   ) {
     setAppState((current) => {
       if (!assignmentId) return current;
-      return {
+      const next = {
         ...current,
         assignments: current.assignments.map((item) =>
           item.id === assignmentId ? updater(item) : item,
         ),
       };
+      appStateRef.current = next;
+      return next;
     });
   }
 
@@ -1134,8 +1154,12 @@ export function PacePalApp() {
     options: { removeMessageIds?: string[] } = {},
   ) {
     const message = content.trim();
-    if (!assignment || !message || chatBusy) return;
+    if (!assignment || !message || chatBusy || chatRequestInFlightRef.current)
+      return;
 
+    chatRequestInFlightRef.current = true;
+    const requestFingerprint = planningFingerprint(assignment);
+    const requestAssignmentId = assignment.id;
     const removedIds = new Set(options.removeMessageIds ?? []);
     const previousMessages = assignment.chatMessages.filter(
       (entry) => !removedIds.has(entry.id),
@@ -1157,6 +1181,23 @@ export function PacePalApp() {
     }));
 
     try {
+      const assertCurrentPlan = () => {
+        const current = appStateRef.current.assignments.find(
+          (item) => item.id === requestAssignmentId,
+        );
+        if (!current || planningFingerprint(current) !== requestFingerprint) {
+          throw new PlanningClientError(
+            "项目在 AI 处理期间已发生修改，请查看最新版本后重试。",
+            {
+              code: "concurrent_modification",
+              reason: "concurrent-modification",
+              retryable: true,
+              status: 409,
+            },
+          );
+        }
+      };
+
       if (assignment.subtasks.length === 0) {
         const requirements = initialPlanningRequirements(
           previousMessages,
@@ -1169,6 +1210,7 @@ export function PacePalApp() {
           deadline: assignment.deadline,
           priority: assignment.priority,
         });
+        assertCurrentPlan();
         const assistantMessage: ChatMessage = {
           content: response.assistantMessage,
           createdAt: new Date().toISOString(),
@@ -1213,6 +1255,7 @@ export function PacePalApp() {
         },
         message,
       );
+      assertCurrentPlan();
       const assistantMessage: ChatMessage = {
         content: response.assistantMessage,
         createdAt: new Date().toISOString(),
@@ -1239,9 +1282,9 @@ export function PacePalApp() {
         };
       });
     } catch (error) {
-      const retryable =
-        error instanceof PlanningClientError &&
-        error.code === "model_unavailable";
+      const retryable = error instanceof PlanningClientError && error.retryable;
+      const errorCode =
+        error instanceof PlanningClientError ? error.code : null;
       const failureMessage =
         error instanceof Error
           ? error.message
@@ -1253,7 +1296,9 @@ export function PacePalApp() {
           {
             content: `${failureMessage} 你的计划没有变化。`,
             createdAt: new Date().toISOString(),
-            errorCode: retryable ? "model_unavailable" : undefined,
+            errorCode: retryable
+              ? (errorCode ?? "provider_unavailable")
+              : undefined,
             id: createId("message"),
             retryForMessageId: retryable ? userMessage.id : undefined,
             role: "assistant",
@@ -1261,6 +1306,7 @@ export function PacePalApp() {
         ],
       }));
     } finally {
+      chatRequestInFlightRef.current = false;
       setChatBusy(false);
     }
   }
@@ -1268,7 +1314,7 @@ export function PacePalApp() {
   function retryChatMessage(failureMessage: ChatMessage) {
     if (
       !assignment ||
-      failureMessage.errorCode !== "model_unavailable" ||
+      !failureMessage.errorCode ||
       !failureMessage.retryForMessageId ||
       chatBusy
     ) {
@@ -2804,8 +2850,7 @@ export function PacePalApp() {
                           <p className="whitespace-pre-wrap">
                             {message.content}
                           </p>
-                          {message.errorCode === "model_unavailable" &&
-                          message.retryForMessageId ? (
+                          {message.errorCode && message.retryForMessageId ? (
                             <button
                               className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 focus:ring-4 focus:ring-violet-500/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                               disabled={chatBusy}

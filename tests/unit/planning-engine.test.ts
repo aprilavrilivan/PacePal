@@ -4,6 +4,7 @@ import type { Assignment } from "@/features/pacepal/model";
 import type { InitialPlanDecision } from "@/features/pacepal/planning/contracts";
 import {
   applyPlanOperations,
+  buildTaskGroupingOperations,
   materializeInitialPlan,
   PlanValidationError,
   validateDraftPhases,
@@ -277,5 +278,88 @@ describe("atomic plan operations", () => {
     expect(
       result.assignment.subtasks.some((task) => task.id === target.id),
     ).toBe(false);
+  });
+
+  it("turns a complete source-to-group mapping into deterministic merge operations", () => {
+    const current = assignment();
+    current.subtasks[0]!.status = "completed";
+    current.subtasks[1]!.status = "in_progress";
+    current.subtasks[1]!.activeSince = "2026-11-25T09:00:00.000Z";
+    const totalMinutes = current.subtasks.reduce(
+      (total, task) => total + task.estimatedMinutes,
+      0,
+    );
+    const groups = [
+      { title: "Task 1", sourceTaskIds: [current.subtasks[0]!.id] },
+      {
+        title: "Prepare scope",
+        sourceTaskIds: [current.subtasks[1]!.id, current.subtasks[2]!.id],
+      },
+      { title: "Task 4", sourceTaskIds: [current.subtasks[3]!.id] },
+      { title: "Task 5", sourceTaskIds: [current.subtasks[4]!.id] },
+      {
+        title: "Produce draft",
+        sourceTaskIds: [current.subtasks[5]!.id, current.subtasks[6]!.id],
+      },
+      { title: "Task 8", sourceTaskIds: [current.subtasks[7]!.id] },
+    ];
+    const operations = buildTaskGroupingOperations(
+      current,
+      { language: "en", groups },
+      6,
+    );
+    const result = applyPlanOperations(current, operations, {
+      language: "en",
+      summary: "Group eight tasks into six steps.",
+    });
+
+    expect(result.assignment.subtasks).toHaveLength(6);
+    expect(result.assignment.subtasks[0]).toMatchObject({
+      id: current.subtasks[0]!.id,
+      status: "completed",
+    });
+    expect(result.assignment.subtasks[1]).toMatchObject({
+      activeSince: "2026-11-25T09:00:00.000Z",
+      status: "in_progress",
+    });
+    expect(
+      result.assignment.subtasks.reduce(
+        (total, task) => total + task.estimatedMinutes,
+        0,
+      ),
+    ).toBe(totalMinutes);
+    expect(() => validateSubtasks(result.assignment.subtasks)).not.toThrow();
+    expect(operations.map((operation) => operation.type)).toEqual([
+      "merge_tasks",
+      "merge_tasks",
+      "reschedule",
+    ]);
+  });
+
+  it("rejects incomplete, duplicate, and completed-task grouping mappings", () => {
+    const current = assignment();
+    current.subtasks[0]!.status = "completed";
+    const original = structuredClone(current);
+
+    expect(() =>
+      buildTaskGroupingOperations(
+        current,
+        {
+          language: "en",
+          groups: [
+            {
+              title: "Invalid",
+              sourceTaskIds: [current.subtasks[0]!.id, current.subtasks[1]!.id],
+            },
+            {
+              title: "Duplicate",
+              sourceTaskIds: [current.subtasks[1]!.id],
+            },
+          ],
+        },
+        2,
+      ),
+    ).toThrow(PlanValidationError);
+    expect(current).toEqual(original);
   });
 });

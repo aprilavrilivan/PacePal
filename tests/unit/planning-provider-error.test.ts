@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyPlanValidation,
   classifyPlanningFailure,
+  planningFailureCode,
   planningFailureMessage,
-  PlanningProviderError,
+  planningFailureStatus,
+  PlanningRequestError,
   safeProviderError,
 } from "@/features/pacepal/planning/provider-error";
 
@@ -11,6 +14,9 @@ describe("planning provider errors", () => {
   it.each([
     ["429 RESOURCE_EXHAUSTED", "quota"],
     ["Request timed out", "timeout"],
+    ["ECONNRESET while reading response", "network"],
+    ["Error in the HTTP2 framing layer", "network"],
+    ["Empty response from model", "invalid-output"],
     ["Output schema validation failed", "invalid-output"],
     ["401 invalid API key", "authentication"],
     ["503 service unavailable", "unavailable"],
@@ -19,16 +25,24 @@ describe("planning provider errors", () => {
   });
 
   it("preserves the single model failure reason", () => {
-    const error = new PlanningProviderError("quota");
+    const error = new PlanningRequestError("quota");
     expect(error.reason).toBe("quota");
   });
 
   it("distinguishes invalid output from an unavailable model", () => {
     expect(planningFailureMessage("invalid-output")).toBe(
-      "本次 AI 生成结果未通过校验，请重试。",
+      "AI 返回的任务数据格式有误，未保存任何更改。",
     );
-    expect(planningFailureMessage("timeout")).toBe(
-      "当前 AI 模型不可用，请稍后重试。",
+    expect(planningFailureMessage("timeout")).toBe("AI 响应超时，请重试。");
+    expect(planningFailureCode("invalid-dependencies")).toBe(
+      "invalid_dependencies",
+    );
+    expect(planningFailureStatus("invalid-output")).toBe(422);
+    expect(classifyPlanValidation(["Unknown task id: missing."])).toBe(
+      "invalid-output",
+    );
+    expect(classifyPlanValidation(["Circular dependency: a -> b -> a."])).toBe(
+      "invalid-dependencies",
     );
   });
 

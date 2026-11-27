@@ -80,6 +80,57 @@ Decision rules:
 `;
 }
 
+export function taskGroupingPrompt(
+  assignment: Assignment,
+  targetCount: number,
+) {
+  return JSON.stringify({
+    instruction: `Group every existing task into exactly ${targetCount} ordered groups. Return each existing task id exactly once. Never invent an id. A completed task must remain a one-task group so its history is preserved. Use a concise title for each group. The backend will preserve details, statuses, durations, and rebuild dependencies.`,
+    project: assignment.title,
+    tasks: assignment.subtasks.map((task) => ({
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      estimatedMinutes: task.estimatedMinutes,
+      phase: task.phase,
+      status: task.status,
+      dependencies: task.dependencies,
+    })),
+  });
+}
+
+function chineseNumber(value: string) {
+  if (/^\d+$/.test(value)) return Number(value);
+  const digits: Record<string, number> = {
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  };
+  if (value in digits) return digits[value]!;
+  if (value === "十") return 10;
+  const [tens, ones = ""] = value.split("十");
+  return (tens ? digits[tens] : 1) * 10 + (ones ? digits[ones] : 0);
+}
+
+export function requestedTaskGroupingCount(message: string) {
+  const match =
+    message.match(
+      /(?:合并|整理|压缩|归并|重组)[^。！？\n]{0,30}?(?:成|为)\s*(\d{1,2}|[一二三四五六七八九十]{1,3})\s*(?:个|步|项|阶段|任务)/,
+    ) ??
+    message.match(
+      /(?:merge|combine|condense|regroup|organize)[^.?!\n]{0,40}?(?:into|to)\s*(?:exactly\s*)?(\d{1,2})\s*(?:steps|tasks|items|groups|phases)/i,
+    );
+  if (!match) return null;
+  const count = chineseNumber(match[1]!);
+  return Number.isInteger(count) && count > 0 ? count : null;
+}
+
 export function refinementUserPrompt(
   assignment: Assignment,
   message: string,
@@ -112,7 +163,7 @@ export function refinementUserPrompt(
       status: task.status,
     })),
     recentConversation: assignment.chatMessages
-      .filter((entry) => entry.errorCode !== "model_unavailable")
+      .filter((entry) => !entry.errorCode)
       .slice(-12)
       .map((entry) => ({
         role: entry.role,
