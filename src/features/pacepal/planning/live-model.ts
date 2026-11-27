@@ -263,10 +263,10 @@ async function generateLiveTaskSplit(assignment: Assignment, message: string) {
     generate: async (abortSignal) => {
       const response = await generateText({
         abortSignal,
-        maxOutputTokens: 4000,
+        maxOutputTokens: 2000,
         maxRetries: 0,
         model: gateway(planningModel),
-        reasoning: "low",
+        reasoning: "none",
         prompt: taskSplitPrompt(assignment, message, sourceTaskIndex),
       });
       return {
