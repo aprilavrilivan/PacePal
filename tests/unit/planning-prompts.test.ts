@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Assignment, Subtask } from "@/features/pacepal/model";
 import {
   requestedTaskGroupingCount,
+  parseTaskSplitTitles,
   requestsTaskCount,
   requestsTaskSplit,
   resolveTaskSplitSourceIndex,
@@ -83,6 +84,15 @@ describe("task split intent", () => {
         "我觉得文献检索这一步还是太大了，请拆得更细。",
       ),
     ).toBe(2);
+  });
+
+  it.each([
+    ["查找数据库\n筛选来源\n记录引文", 3],
+    ['["查找数据库","筛选来源","记录引文"]', 3],
+    ['{"titles":["查找数据库","筛选来源"]}', 2],
+    ["1. 查找数据库 2. 筛选来源 3. 记录引文", 3],
+  ])("parses common title-only outputs", (output, count) => {
+    expect(parseTaskSplitTitles(output)).toHaveLength(count);
   });
 });
 

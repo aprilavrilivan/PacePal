@@ -29,6 +29,7 @@ import {
 import {
   initialPlanSystemPrompt,
   initialPlanUserPrompt,
+  parseTaskSplitTitles,
   refinementSystemPrompt,
   refinementUserPrompt,
   requestedTaskGroupingCount,
@@ -268,13 +269,11 @@ async function generateLiveTaskSplit(assignment: Assignment, message: string) {
         reasoning: "low",
         prompt: taskSplitPrompt(assignment, message, sourceTaskIndex),
       });
-      const titles = response.text
-        .split("\n")
-        .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)、])\s*/, "").trim())
-        .filter((line) => line && !line.startsWith("```"));
       return {
         usage: response.usage,
-        value: taskSplitProposalSchema.parse({ titles }),
+        value: taskSplitProposalSchema.parse({
+          titles: parseTaskSplitTitles(response.text),
+        }),
       };
     },
     validate: (value) => {

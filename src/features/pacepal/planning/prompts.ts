@@ -215,6 +215,24 @@ export function taskSplitPrompt(
   });
 }
 
+export function parseTaskSplitTitles(value: string) {
+  const text = value.replace(/```(?:json)?/gi, "").trim();
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === "object" && "titles" in parsed) {
+      return (parsed as { titles: unknown }).titles;
+    }
+  } catch {
+    // Fall through to the line-oriented contract.
+  }
+  const lines = text
+    .split(/\r?\n|(?=\s*\d+[.)、]\s*)/)
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)、])\s*/, "").trim())
+    .filter((line) => line && !/^titles?\s*[:：]?$/i.test(line));
+  return lines.length === 1 ? lines[0]!.split(/\s*[，,；;、]\s*/) : lines;
+}
+
 export function refinementUserPrompt(
   assignment: Assignment,
   message: string,
