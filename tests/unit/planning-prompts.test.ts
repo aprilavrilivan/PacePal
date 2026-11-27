@@ -70,6 +70,7 @@ describe("task grouping intent", () => {
 describe("task split intent", () => {
   it.each([
     ["把文献检索进一步拆细。", true],
+    ["我觉得文献检索这一步太大了，能不能拆得更细一点？", true],
     ["Break the drafting task down into smaller steps.", true],
     ["文献检索一共有几步？", false],
   ])("recognizes %s", (message, expected) => {
