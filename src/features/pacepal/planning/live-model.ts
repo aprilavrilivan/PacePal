@@ -262,18 +262,20 @@ async function generateLiveTaskSplit(assignment: Assignment, message: string) {
     generate: async (abortSignal) => {
       const response = await generateText({
         abortSignal,
-        maxOutputTokens: 2000,
+        maxOutputTokens: 1000,
         maxRetries: 0,
         model: gateway(planningModel),
-        output: Output.object({
-          description: "A concise ordered list of replacement task titles.",
-          name: "pacepal_task_split",
-          schema: taskSplitProposalSchema,
-        }),
         reasoning: "low",
         prompt: taskSplitPrompt(assignment, message, sourceTaskIndex),
       });
-      return { usage: response.usage, value: response.output };
+      const titles = response.text
+        .split("\n")
+        .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)、])\s*/, "").trim())
+        .filter((line) => line && !line.startsWith("```"));
+      return {
+        usage: response.usage,
+        value: taskSplitProposalSchema.parse({ titles }),
+      };
     },
     validate: (value) => {
       try {

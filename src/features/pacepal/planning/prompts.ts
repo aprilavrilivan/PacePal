@@ -202,7 +202,7 @@ export function taskSplitPrompt(
   const task = assignment.subtasks[sourceTaskIndex - 1]!;
   return JSON.stringify({
     instruction:
-      "Return only 2-8 concise, ordered, non-overlapping replacement task titles for the selected task. The backend has already selected the task and will preserve its status, total duration, details, and dependencies.",
+      "Return 2-8 concise, ordered, non-overlapping replacement task titles. Write exactly one title per line with no numbering, bullets, preface, explanation, or JSON. The backend has already selected the task and will preserve its status, total duration, details, and dependencies.",
     userMessage: message,
     project: assignment.title,
     task: {
