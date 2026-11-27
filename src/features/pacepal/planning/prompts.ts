@@ -64,6 +64,7 @@ Decision rules:
 - For progress reports, change status only when the statement clearly supports it. If statements conflict, ask for clarification and return no operations.
 - A pure progress report may use set_status and may use update_task only to record explicit progress in the description of the directly named existing task. When the user reports numeric partial progress (for example, 4 of 6 sources read), record it with update_task while preserving the existing description and without marking the task complete. Do not change its title, estimate, completion criterion, difficulty, priority, phase, or dependencies.
 - For a pure progress report, never add, split, merge, delete, reorder, or rename tasks, and never rewrite unrelated tasks. Never infer missing downstream tasks from a status update.
+- When a message combines explicit progress with an ambiguous plan change, record only the explicit progress, ask one focused question, and return no other operations.
 - For plan changes, make the smallest sufficient set of operations and preserve unaffected task IDs and completed work.
 - Never update, delete, split, or merge a completed task. Use reopen_task only when the user explicitly corrects a completed status.
 - If the user asks to split or rewrite a task that is completed, or their wording could refer to either a completed task or an active task, ask which task they mean and return no operations. Never guess and never attempt operations on the completed task.
