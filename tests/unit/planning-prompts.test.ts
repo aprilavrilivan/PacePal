@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   requestedTaskGroupingCount,
+  requestsTaskCount,
   requestsTaskSplit,
 } from "@/features/pacepal/planning/prompts";
 
@@ -23,5 +24,15 @@ describe("task split intent", () => {
     ["文献检索一共有几步？", false],
   ])("recognizes %s", (message, expected) => {
     expect(requestsTaskSplit(message)).toBe(expected);
+  });
+});
+
+describe("task count intent", () => {
+  it.each([
+    ["现在一共有多少个子任务？", true],
+    ["How many tasks are in this project?", true],
+    ["把任务数量调整一下。", false],
+  ])("recognizes %s", (message, expected) => {
+    expect(requestsTaskCount(message)).toBe(expected);
   });
 });

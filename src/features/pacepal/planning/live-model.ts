@@ -32,6 +32,7 @@ import {
   refinementSystemPrompt,
   refinementUserPrompt,
   requestedTaskGroupingCount,
+  requestsTaskCount,
   requestsTaskSplit,
   taskGroupingPrompt,
   taskSplitPrompt,
@@ -286,6 +287,34 @@ async function generateLiveTaskSplit(assignment: Assignment, message: string) {
   };
 }
 
+function taskCountDecision(assignment: Assignment) {
+  const completed = assignment.subtasks.filter(
+    (task) => task.status === "completed",
+  ).length;
+  const remaining = assignment.subtasks.length - completed;
+  const language = assignment.language ?? "zh";
+  return {
+    decision: {
+      language,
+      intent: "question" as const,
+      assistantMessage:
+        language === "en"
+          ? `This project has ${assignment.subtasks.length} tasks: ${completed} completed and ${remaining} remaining.`
+          : `这个项目共有 ${assignment.subtasks.length} 个子任务，其中 ${completed} 个已完成，${remaining} 个未完成。`,
+      confirmation: "not_required" as const,
+      operations: [],
+    },
+    model: planningModel,
+    usage: {
+      cacheReadTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 0,
+    },
+  };
+}
+
 export async function generateLiveInitialPlan(
   assignment: AssignmentInput,
 ): Promise<{
@@ -350,6 +379,7 @@ export async function generateLiveRefinement(
   model: string;
   usage: ModelUsage;
 }> {
+  if (requestsTaskCount(message)) return taskCountDecision(assignment);
   const groupingCount = requestedTaskGroupingCount(message);
   if (groupingCount !== null && groupingCount < assignment.subtasks.length) {
     return generateLiveTaskGrouping(assignment, groupingCount);

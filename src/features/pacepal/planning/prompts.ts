@@ -135,6 +135,12 @@ export function requestsTaskSplit(message: string) {
   return /拆细|拆分|进一步分解|分解成|split|break.{0,20}down/i.test(message);
 }
 
+export function requestsTaskCount(message: string) {
+  return /多少(?:个)?(?:子任务|任务)|(?:子任务|任务)(?:的)?(?:数量|总数)(?:是|有)?多少|how many (?:sub)?tasks|(?:number|total) of (?:sub)?tasks/i.test(
+    message,
+  );
+}
+
 export function taskSplitPrompt(assignment: Assignment, message: string) {
   return JSON.stringify({
     instruction:
