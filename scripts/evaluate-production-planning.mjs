@@ -117,7 +117,6 @@ function assignment({
   requirements = "研究1970年代湖北农村农业发展、家庭收入、居住条件与住房变化之间的关系；至少6份资料。",
   deliverable = "2500字历史课程论文",
   due = deadline,
-  dailyMinutes = 90,
   tasks,
   language = "zh",
 }) {
@@ -131,9 +130,8 @@ function assignment({
     deadline: due,
     priority: "high",
     subtasks: tasks,
-    availability: { dailyMinutes, preferredTime: "19:00" },
     schedule: [],
-    unscheduledMinutes: 0,
+    scheduleVersion: 2,
     checkIn: { availableMinutes: 30, energy: "medium" },
     scheduleNotice: "",
     chatMessages: [],
@@ -208,7 +206,6 @@ function mergePlan(source, response) {
     ...structuredClone(response.plan),
     status: source.status,
     schedule: source.schedule,
-    unscheduledMinutes: source.unscheduledMinutes,
     checkIn: source.checkIn,
     scheduleNotice: source.scheduleNotice,
     chatMessages: source.chatMessages,
@@ -241,7 +238,6 @@ function compactPlan(value) {
     title: value.title,
     requirements: value.requirements,
     deadline: value.deadline,
-    availability: value.availability,
     planVersion: value.planVersion,
     tasks: value.subtasks.map((item) => ({
       id: item.id,
@@ -397,7 +393,6 @@ refineTest(
 const constrainedTime = assignment({
   id: "time-conflict",
   due: "2026-12-04T10:00:00.000Z",
-  dailyMinutes: 120,
   tasks: [
     task("T1", "完成必要资料检索", "todo", 240),
     task("T2", "整理证据与论点", "todo", 180, ["T1"]),

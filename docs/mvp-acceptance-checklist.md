@@ -30,12 +30,10 @@ This checklist is the release gate for the web MVP. A checked item must be demon
 
 ## 4. Initial scheduling
 
-- [ ] A user can enter available study periods and a basic energy profile.
 - [ ] The engine schedules required dependencies in a valid order.
-- [ ] No task is placed outside the user's availability.
-- [ ] Long work can be divided into usable study blocks without losing the original estimate.
-- [ ] A user can manually move or lock a schedule block.
-- [ ] Unallocated work is visible.
+- [ ] Every unfinished subtask appears on exactly one date.
+- [ ] The engine places one subtask per day when the deadline allows and multiple whole subtasks per day only when necessary.
+- [ ] A user can drag a subtask to another date.
 - [ ] The same inputs produce a deterministic, testable result.
 
 ## 5. Next-step recommendation
@@ -58,10 +56,10 @@ This checklist is the release gate for the web MVP. A checked item must be demon
 
 - [ ] Postponing a scheduled task triggers a future-plan recalculation.
 - [ ] Completed work is never moved back into the remaining plan.
-- [ ] User-locked blocks are respected where feasible and conflicts are explained.
+- [ ] User-moved dates are preserved during later recalculation.
 - [ ] No unfinished task disappears during rescheduling.
 - [ ] The user can see a concise summary of changed blocks.
-- [ ] When remaining work exceeds capacity, the system displays the estimated shortfall.
+- [ ] A close deadline produces denser days without duplicating or splitting subtasks.
 - [ ] The revised plan remains editable and requires user acceptance when changes are material.
 
 ## 8. Companion experience
@@ -77,7 +75,7 @@ This checklist is the release gate for the web MVP. A checked item must be demon
 - [ ] AI credentials and server secrets are absent from client bundles and repository history.
 - [ ] Core screens have loading, empty, error, and success states.
 - [ ] All visible primary controls are functional.
-- [ ] The scheduler has automated coverage for dependencies, availability, postponement, insufficient capacity, and timezone boundaries.
+- [ ] The scheduler has automated coverage for dependencies, postponement, deadline compression, migration, and timezone boundaries.
 - [ ] The primary end-to-end scenario passes in an automated browser test.
 - [ ] The deployed application contains no required workflow that depends on manually fabricated data.
 
@@ -100,10 +98,10 @@ The release candidate must demonstrate this uninterrupted scenario:
 2. Create a course paper due in ten days.
 3. Generate and edit an AI breakdown.
 4. Approve the breakdown.
-5. Enter availability and generate a schedule.
+5. Review the automatically generated calendar and drag one subtask to a new date.
 6. Check in with limited time and energy.
 7. Start and complete the recommended task.
 8. Postpone a later task.
 9. Review the automatically revised schedule.
-10. Observe a clear warning when the revised workload cannot fit.
+10. Observe denser daily placement when the deadline has fewer days than remaining subtasks.
 11. Receive a brief, non-judgmental companion response.

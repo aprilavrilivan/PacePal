@@ -23,14 +23,12 @@
 5. PacePal validates the plan, including dependency cycles and total duration.
 6. The student explicitly approves the plan.
 
-### D. Set availability and schedule
+### D. Review and adjust the schedule
 
-1. The student supplies available study periods and a simple daily energy profile.
-2. PacePal creates valid time slots before the deadline.
-3. The scheduling engine allocates eligible subtasks in dependency order.
-4. The student reviews the schedule and may move or lock blocks.
-5. PacePal explains any unallocated work or deadline risk.
-6. The student accepts the initial schedule.
+1. PacePal places one whole subtask per day from today when the deadline allows it.
+2. When there are more subtasks than remaining days, PacePal distributes multiple whole subtasks across the days before the deadline.
+3. Each subtask appears on exactly one date and dependency order is preserved.
+4. The student reviews the calendar and may drag any unfinished subtask to another date.
 
 ### E. Decide what to do now
 
@@ -45,7 +43,7 @@
 2. The student can pause or resume the session.
 3. On completion, the student records whether the subtask is complete and optionally adjusts actual or remaining time.
 4. PacePal updates assignment progress and provides brief positive feedback.
-5. The remaining schedule is recalculated if the new information changes capacity or timing.
+5. The remaining schedule is recalculated when status or timing changes.
 
 ### G. Recover from disruption
 
@@ -53,8 +51,8 @@
 2. PacePal preserves completed and manually locked work.
 3. It recalculates only the affected future plan.
 4. It summarizes what moved and why.
-5. If remaining capacity is insufficient, it displays the workload gap and deadline risk.
-6. The student accepts the revision or makes a manual adjustment.
+5. If the deadline is close, more subtasks are placed on each remaining day.
+6. The student can make a manual drag adjustment.
 
 ## 2. "I'm stuck" recovery flow
 
@@ -75,13 +73,12 @@
 4. The user can retry or continue editing manually; PacePal does not substitute a synthetic breakdown.
 5. Scheduling continues to work for manually entered subtasks because it is not dependent on the LLM.
 
-## 4. Infeasible-deadline flow
+## 4. Packed-deadline flow
 
-1. The scheduling engine compares remaining estimated work with usable study capacity before the deadline.
-2. If work exceeds capacity, PacePal does not label the plan feasible.
-3. It shows the estimated shortfall and identifies the largest constraints.
-4. It offers valid planning actions such as increasing availability, reducing task scope, revising estimates, or discussing the deadline with the instructor.
-5. No unfinished task is silently omitted from the schedule.
+1. The scheduling engine compares the number of unfinished subtasks with the number of dates through the deadline.
+2. If there are more subtasks than days, it distributes multiple whole subtasks across those dates.
+3. No subtask is split across dates or silently omitted.
+4. The student can drag tasks to preferred dates.
 
 ## 5. Returning-user flow
 

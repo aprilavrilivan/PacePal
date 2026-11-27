@@ -54,7 +54,6 @@ function assignment(
   task: Subtask,
 ): Assignment {
   return {
-    availability: { dailyMinutes: 60, preferredTime: "18:00" },
     chatMessages: [],
     checkIn: { availableMinutes: 30, energy: "medium" },
     createdAt: "2026-11-20T10:00:00.000Z",
@@ -68,7 +67,7 @@ function assignment(
     status: "scheduled",
     subtasks: [task],
     title: id,
-    unscheduledMinutes: 0,
+    scheduleVersion: 2,
   };
 }
 

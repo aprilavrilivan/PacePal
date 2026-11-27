@@ -15,7 +15,7 @@ The product is successful only when the following loop works as one connected ex
 1. Understand the assignment.
 2. Break it into manageable subtasks.
 3. Let the student review and approve the plan.
-4. Schedule the work around real availability and dependencies.
+4. Place each subtask on one calendar date in dependency order.
 5. Recommend an appropriate action for the current moment.
 6. Record completion, actual time, postponement, or difficulty.
 7. Recalculate the remaining schedule and communicate deadline risk.
@@ -49,7 +49,7 @@ Every MVP feature must follow these rules:
 ### 4.1 Account and persistence
 
 - Email-based sign-in suitable for a web MVP.
-- Persistent storage of the user's profile, assignment, subtasks, availability, schedule, study sessions, and relevant AI conversation context.
+- Persistent storage of the user's profile, assignment, subtasks, schedule, study sessions, and relevant AI conversation context.
 - User-level authorization so one user cannot access another user's data.
 - User timezone stored and used consistently for deadlines and schedules.
 
@@ -68,19 +68,18 @@ Every MVP feature must follow these rules:
 - Suggest multiple manageable next actions when useful.
 - Further decompose a difficult subtask.
 - Preserve relevant assignment and progress context.
-- Refine the active task list and availability through a persistent conversation.
+- Refine the active task list through a persistent conversation.
 - Validate structured model output before displaying or saving it.
 - Require explicit user confirmation before a generated plan becomes active.
 - Report model unavailability without generating or saving a synthetic plan.
 
-### 4.4 Availability and initial scheduling
+### 4.4 Initial scheduling
 
-- Capture recurring or date-specific study availability.
-- Capture preferred study periods and a simple energy profile.
-- Generate an initial schedule from deadline, dependencies, durations, availability, priority, and energy suitability.
+- Place one whole subtask per day from today when the deadline allows it.
+- Distribute multiple whole subtasks per day when there are more tasks than days before the deadline.
 - Prevent required dependencies from being scheduled out of order.
-- Allow the user to adjust or lock a scheduled block.
-- Identify work that could not be allocated.
+- Allow the user to drag a subtask to another date.
+- Display consecutive dates for the same project as a connected calendar span.
 
 ### 4.5 Context-aware next-step recommendation
 
@@ -99,10 +98,10 @@ Every MVP feature must follow these rules:
 
 ### 4.7 Dynamic rescheduling and risk
 
-- Recalculate future work after completion, postponement, missed work, duration changes, or availability changes.
-- Preserve completed work and respect user-locked future blocks where feasible.
+- Recalculate future work after completion, postponement, missed work, or task changes.
+- Preserve completed work and user-moved dates.
 - Never silently discard unfinished work.
-- Warn when the remaining workload no longer fits before the deadline.
+- Increase the number of whole subtasks per day when the deadline is close.
 - Explain the most important schedule changes and allow the user to accept or adjust them.
 
 ### 4.8 Web companion pet

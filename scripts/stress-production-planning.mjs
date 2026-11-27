@@ -47,9 +47,8 @@ function assignment(count = 10) {
     subtasks: Array.from({ length: count }, (_, index) =>
       task(index + 1, count),
     ),
-    availability: { dailyMinutes: 90, preferredTime: "19:00" },
     schedule: [],
-    unscheduledMinutes: 0,
+    scheduleVersion: 2,
     checkIn: { availableMinutes: 30, energy: "medium" },
     scheduleNotice: "",
     chatMessages: [],

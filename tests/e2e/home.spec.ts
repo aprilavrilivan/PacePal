@@ -69,7 +69,6 @@ async function mockPlanningApi(page: Page) {
         deliverable: string;
         deadline: string;
         priority: "low" | "medium" | "high";
-        availability: { dailyMinutes: number; preferredTime: string };
         subtasks: ReturnType<typeof fixtureTasks>;
         language?: "zh" | "en";
         planVersion?: number;
@@ -120,7 +119,6 @@ async function mockPlanningApi(page: Page) {
           deliverable: assignment.deliverable,
           deadline: assignment.deadline,
           priority: assignment.priority,
-          availability: assignment.availability,
           subtasks: assignment.subtasks.map((task) =>
             task.id === target?.id ? { ...task, status: "completed" } : task,
           ),
@@ -465,20 +463,22 @@ test("keeps multiple assignments and lets the user switch between them", async (
   await expect(page.getByText("还没有任务拆解")).toBeVisible();
 });
 
-test("scrolls through every calendar item and distinguishes weekends from adjacent months", async ({
+test("grows busy calendar weeks, supports drag scheduling, and distinguishes weekends", async ({
   page,
 }) => {
   const subtasks = fixtureTasks().slice(0, 5);
   await page.goto("/");
-  const todayKey = await page.evaluate((tasks) => {
+  const { todayKey, tomorrowKey } = await page.evaluate((tasks) => {
     const today = new Date();
     const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const nextKey = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
     window.localStorage.setItem(
       "pacepal:app-state:v1",
       JSON.stringify({
         assignments: [
           {
-            availability: { dailyMinutes: 60, preferredTime: "09:00" },
             chatMessages: [],
             checkIn: { availableMinutes: 30, energy: "medium" },
             createdAt: new Date().toISOString(),
@@ -496,17 +496,17 @@ test("scrolls through every calendar item and distinguishes weekends from adjace
               subtaskId: task.id,
             })),
             scheduleNotice: "",
+            scheduleVersion: 2,
             status: "scheduled",
             subtasks: tasks,
             title: "日历滚动测试",
-            unscheduledMinutes: 0,
           },
         ],
         selectedAssignmentId: "calendar-scroll-assignment",
         version: 2,
       }),
     );
-    return key;
+    return { todayKey: key, tomorrowKey: nextKey };
   }, subtasks);
   await page.reload();
   await page.getByRole("button", { exact: true, name: "日历" }).click();
@@ -514,34 +514,32 @@ test("scrolls through every calendar item and distinguishes weekends from adjace
   const events = page.locator(`[data-calendar-events="${todayKey}"]`);
   await expect(events.locator("button")).toHaveCount(5);
   await expect(page.getByText(/还有 \d+ 项/)).toHaveCount(0);
+  await expect(events).not.toHaveClass(/overflow-y-auto/);
   await expect
     .poll(() =>
-      events.evaluate((element) => element.scrollHeight > element.clientHeight),
+      events.evaluate(
+        (element) => element.scrollHeight === element.clientHeight,
+      ),
     )
     .toBe(true);
 
   await page.evaluate(() => window.scrollTo(0, 0));
   await events.hover();
-  const pageScrollBeforePackedCell = await page.evaluate(() => window.scrollY);
-  await page.mouse.wheel(0, 180);
-  await expect
-    .poll(() => events.evaluate((element) => element.scrollTop))
-    .toBeGreaterThan(0);
-  expect(await page.evaluate(() => window.scrollY)).toBe(
-    pageScrollBeforePackedCell,
-  );
-
-  await page.evaluate(() => window.scrollTo(0, 0));
-  const emptyCell = page
-    .locator("[data-calendar-events]")
-    .filter({ hasNot: page.locator("button") })
-    .first();
-  await emptyCell.hover();
-  const pageScrollBeforeEmptyCell = await page.evaluate(() => window.scrollY);
   await page.mouse.wheel(0, 180);
   await expect
     .poll(() => page.evaluate(() => window.scrollY))
-    .toBeGreaterThan(pageScrollBeforeEmptyCell);
+    .toBeGreaterThan(0);
+
+  await page
+    .getByRole("button", { name: /理解任务要求/ })
+    .dragTo(page.locator(`[data-date="${tomorrowKey}"]`));
+  await expect(
+    page
+      .locator(`[data-calendar-events="${tomorrowKey}"]`)
+      .getByRole("button", {
+        name: /理解任务要求/,
+      }),
+  ).toBeVisible();
 
   const cellStyles = await page.locator("[data-date]").evaluateAll((cells) => {
     const currentMonth = new Date().getMonth();

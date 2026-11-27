@@ -80,17 +80,12 @@ const priorityScore: Record<Assignment["priority"], number> = {
   low: 10,
 };
 
-function hourFromTime(value: string) {
-  return Number(value.split(":")[0]);
-}
-
 export function recommendAcrossAssignments(
   assignments: Assignment[],
   checkIn: CheckIn,
   now = new Date(),
 ): GlobalTaskRecommendation | null {
   const today = dateKey(now);
-  const currentHour = now.getHours();
   const candidates: GlobalTaskRecommendation[] = [];
 
   for (const assignment of assignments) {
@@ -104,13 +99,6 @@ export function recommendAcrossAssignments(
       (new Date(assignment.deadline).getTime() - now.getTime()) / 86_400_000,
     );
     const urgency = Math.max(0, 35 - Math.min(35, daysRemaining * 2.5));
-    const preferredHour = hourFromTime(assignment.availability.preferredTime);
-    const hourDistance = Math.min(
-      Math.abs(currentHour - preferredHour),
-      24 - Math.abs(currentHour - preferredHour),
-    );
-    const timeOfDayFit = Math.max(0, 10 - hourDistance * 2);
-
     for (const task of assignment.subtasks) {
       if (
         task.status === "completed" ||
@@ -131,7 +119,6 @@ export function recommendAcrossAssignments(
         urgency +
         (fitsEnergy ? 15 : -10) +
         (fitsTime ? 10 : 4) +
-        timeOfDayFit +
         continuity;
       const reasons = [
         daysRemaining < 3

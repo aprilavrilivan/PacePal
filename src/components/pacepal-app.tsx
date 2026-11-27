@@ -167,7 +167,6 @@ function rebuildAssignmentSchedule(
   const result = buildSchedule(
     assignment.subtasks,
     assignment.deadline,
-    assignment.availability,
     now,
     assignment.schedule,
   );
@@ -175,8 +174,19 @@ function rebuildAssignmentSchedule(
   return {
     ...assignment,
     schedule: result.blocks,
+    scheduleVersion: 2,
     scheduleNotice,
-    unscheduledMinutes: result.unscheduledMinutes,
+  };
+}
+
+function normalizeSchedules(state: AppState, now = new Date()): AppState {
+  return {
+    ...state,
+    assignments: state.assignments.map((assignment) =>
+      assignment.scheduleVersion === 2
+        ? assignment
+        : rebuildAssignmentSchedule(assignment, "", now),
+    ),
   };
 }
 
@@ -222,7 +232,6 @@ function planningFingerprint(assignment: Assignment) {
     deliverable: assignment.deliverable,
     deadline: assignment.deadline,
     priority: assignment.priority,
-    availability: assignment.availability,
     subtasks: assignment.subtasks,
   });
 }
@@ -348,7 +357,7 @@ export function PacePalApp() {
     let cancelled = false;
 
     async function initialize() {
-      let storedState = loadAppState();
+      let storedState = normalizeSchedules(loadAppState());
       const storedOwner = loadAppStateOwner();
 
       if (!cloudEnabled) {
@@ -390,7 +399,10 @@ export function PacePalApp() {
             setSyncStatus("local");
           }
         } else {
-          const cloudState = await loadCloudState(client, currentUser.id);
+          const loadedCloudState = await loadCloudState(client, currentUser.id);
+          const cloudState = loadedCloudState
+            ? normalizeSchedules(loadedCloudState)
+            : null;
           const canMigrateLocalState =
             !storedOwner || storedOwner === currentUser.id;
           const nextState =
@@ -606,9 +618,8 @@ export function PacePalApp() {
       createdAt: new Date().toISOString(),
       status: "scheduled",
       subtasks: [],
-      availability: { dailyMinutes: 240, preferredTime: "09:00" },
       schedule: [],
-      unscheduledMinutes: 0,
+      scheduleVersion: 2,
       checkIn: { availableMinutes: 30, energy: "medium" },
       scheduleNotice: "",
       chatMessages: [],
@@ -793,18 +804,14 @@ export function PacePalApp() {
 
     setPlanError("");
     setEditingTaskId(null);
-    const result = buildSchedule(
-      assignment.subtasks,
-      assignment.deadline,
-      assignment.availability,
-    );
+    const result = buildSchedule(assignment.subtasks, assignment.deadline);
 
     updateAssignment((current) => ({
       ...current,
       status: "scheduled",
       schedule: result.blocks,
+      scheduleVersion: 2,
       scheduleNotice: "",
-      unscheduledMinutes: result.unscheduledMinutes,
     }));
     setDashboardView("overview");
     setScreen("dashboard");
@@ -1124,29 +1131,90 @@ export function PacePalApp() {
 
     setAppState((current) => ({
       ...current,
-      assignments: current.assignments.map((item) => ({
-        ...item,
+      assignments: current.assignments.map((item) => {
+        const selected = normalized.filter(
+          (block) => block.assignmentId === item.id,
+        );
+        const selectedTaskIds = new Set(
+          selected.map((block) => block.subtaskId),
+        );
+        const manualBlocks = [
+          ...item.schedule.filter(
+            (block) =>
+              block.date !== today && !selectedTaskIds.has(block.subtaskId),
+          ),
+          ...selected.map((block) => ({
+            date: block.date,
+            durationMinutes: block.durationMinutes,
+            id: block.blockId,
+            locked: block.locked,
+            startTime: block.startTime,
+            subtaskId: block.subtaskId,
+          })),
+        ];
+        const result = buildSchedule(
+          item.subtasks,
+          item.deadline,
+          new Date(),
+          manualBlocks,
+        );
+        return {
+          ...item,
+          schedule: result.blocks,
+          scheduleNotice: "",
+          scheduleVersion: 2 as const,
+        };
+      }),
+    }));
+    setTodayPlanEditing(false);
+  }
+
+  function moveScheduledSubtask(
+    assignmentId: string,
+    subtaskId: string,
+    date: string,
+  ) {
+    updateAssignment((current) => {
+      const block = current.schedule.find(
+        (candidate) => candidate.subtaskId === subtaskId,
+      );
+      if (!block || block.date === date) return current;
+
+      const lastEnd = current.schedule
+        .filter(
+          (candidate) =>
+            candidate.date === date && candidate.subtaskId !== subtaskId,
+        )
+        .reduce((latest, candidate) => {
+          const [hours, minutes] = candidate.startTime.split(":").map(Number);
+          return Math.max(
+            latest,
+            hours * 60 + minutes + candidate.durationMinutes,
+          );
+        }, 540);
+      const moved = {
+        ...block,
+        date,
+        locked: true,
+        startTime: addMinutesToTime("00:00", lastEnd),
+      };
+
+      return {
+        ...current,
         schedule: [
-          ...item.schedule.filter((block) => block.date !== today),
-          ...normalized
-            .filter((block) => block.assignmentId === item.id)
-            .map((block) => ({
-              date: block.date,
-              durationMinutes: block.durationMinutes,
-              id: block.blockId,
-              locked: block.locked,
-              startTime: block.startTime,
-              subtaskId: block.subtaskId,
-            })),
+          ...current.schedule.filter(
+            (candidate) => candidate.subtaskId !== subtaskId,
+          ),
+          moved,
         ].sort(
           (left, right) =>
             left.date.localeCompare(right.date) ||
             left.startTime.localeCompare(right.startTime),
         ),
-        scheduleNotice: "",
-      })),
-    }));
-    setTodayPlanEditing(false);
+        scheduleNotice: "日历安排已手动调整",
+        scheduleVersion: 2,
+      };
+    }, assignmentId);
   }
 
   async function sendChatMessage(
@@ -2942,6 +3010,7 @@ export function PacePalApp() {
         {dashboardView === "schedule" ? (
           <CalendarMonthView
             assignments={assignments}
+            onMoveSubtask={moveScheduledSubtask}
             onSelectAssignment={(assignmentId) =>
               selectAssignment(assignmentId, "tasks")
             }

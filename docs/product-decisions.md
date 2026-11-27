@@ -52,7 +52,7 @@ These decisions convert the product brief into an implementation boundary. Chang
 
 ## PD-009 — User-local time is authoritative
 
-**Decision:** Deadlines, availability, recommendations, and schedule blocks are interpreted in the user's configured timezone and stored in an unambiguous format.
+**Decision:** Deadlines, recommendations, and schedule dates are interpreted in the user's configured timezone and stored in an unambiguous format.
 
 **Reason:** Scheduling behavior becomes unreliable if browser, server, and database time assumptions diverge.
 
@@ -98,7 +98,7 @@ These decisions convert the product brief into an implementation boundary. Chang
 
 ## PD-015 — Rescheduling preserves explicit commitments
 
-**Decision:** Completing, postponing, blocking, or moving work rebuilds the remaining schedule. Locked blocks are retained, completed tasks are removed, blocked dependency chains remain unscheduled, and any deadline-capacity shortfall is shown directly.
+**Decision:** Every unfinished subtask has one calendar date. Completing, postponing, blocking, or moving work rebuilds the remaining schedule; manually moved dates are retained and completed or blocked work is removed.
 
 **Reason:** Dynamic plans are only useful when they adapt without silently moving commitments the user chose to protect.
 

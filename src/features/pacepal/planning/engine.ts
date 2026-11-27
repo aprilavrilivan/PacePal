@@ -262,7 +262,6 @@ function planComparable(assignment: Assignment) {
     deliverable: assignment.deliverable,
     deadline: assignment.deadline,
     priority: assignment.priority,
-    availability: assignment.availability,
     subtasks: assignment.subtasks,
   };
 }
@@ -497,7 +496,6 @@ export function applyPlanOperations(
     ...task,
     dependencies: [...task.dependencies],
   }));
-  let availability = { ...assignment.availability };
   let input = {
     title: assignment.title,
     requirements: assignment.requirements,
@@ -760,15 +758,6 @@ export function applyPlanOperations(
       continue;
     }
 
-    if (operation.type === "set_availability") {
-      const next = { ...availability, ...operation.availability };
-      if (sameValue(availability, next)) {
-        throw new PlanValidationError(["Availability update is a no-op."]);
-      }
-      availability = next;
-      continue;
-    }
-
     if (operation.type === "update_assignment") {
       const next = { ...input, ...operation.changes };
       if (sameValue(input, next)) {
@@ -785,7 +774,6 @@ export function applyPlanOperations(
   const candidate = assignmentSchema.parse({
     ...assignment,
     ...input,
-    availability,
     subtasks,
   });
   const dataChanged = !sameValue(before, planComparable(candidate));
@@ -829,7 +817,6 @@ export function snapshotPlan(
     deliverable: assignment.deliverable,
     deadline: assignment.deadline,
     priority: assignment.priority,
-    availability: assignment.availability,
     subtasks: assignment.subtasks,
     language,
     planVersion: assignment.planVersion ?? 1,

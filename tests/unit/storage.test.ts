@@ -79,5 +79,7 @@ describe("local state ownership", () => {
       postponedUntil: null,
     });
     expect(state.assignments[0]?.schedule[0].locked).toBe(false);
+    expect("availability" in state.assignments[0]!).toBe(false);
+    expect("unscheduledMinutes" in state.assignments[0]!).toBe(false);
   });
 });

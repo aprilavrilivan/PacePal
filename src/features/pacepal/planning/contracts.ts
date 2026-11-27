@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
   assignmentInputSchema,
   assignmentSchema,
-  availabilitySchema,
   planChangeSchema,
   prioritySchema,
   subtaskSchema,
@@ -107,10 +106,6 @@ export const planOperationSchema = z.discriminatedUnion("type", [
     to: z.string().trim().min(1).max(120),
   }),
   z.object({
-    type: z.literal("set_availability"),
-    availability: availabilitySchema.partial(),
-  }),
-  z.object({
     type: z.literal("update_assignment"),
     changes: assignmentInputSchema.partial(),
   }),
@@ -164,7 +159,6 @@ export const planSnapshotSchema = z.object({
   deliverable: z.string().trim().max(1200),
   deadline: z.string().min(1),
   priority: prioritySchema,
-  availability: availabilitySchema,
   subtasks: z.array(subtaskSchema).min(1),
   language: planningLanguageSchema,
   planVersion: z.number().int().positive(),

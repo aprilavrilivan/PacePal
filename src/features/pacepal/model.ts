@@ -43,11 +43,6 @@ export const planChangeSchema = z.object({
   operationTypes: z.array(z.string().trim().min(1)).max(64),
 });
 
-export const availabilitySchema = z.object({
-  dailyMinutes: z.number().int().min(15).max(240),
-  preferredTime: z.string().regex(/^\d{2}:\d{2}$/),
-});
-
 export const scheduleBlockSchema = z.object({
   id: z.string().min(1),
   subtaskId: z.string().min(1),
@@ -87,9 +82,8 @@ export const assignmentSchema = assignmentInputSchema.extend({
   createdAt: z.string().min(1),
   status: z.enum(["planning", "scheduled"]),
   subtasks: z.array(subtaskSchema),
-  availability: availabilitySchema,
   schedule: z.array(scheduleBlockSchema),
-  unscheduledMinutes: z.number().int().min(0),
+  scheduleVersion: z.literal(2).optional(),
   checkIn: checkInSchema.default({ availableMinutes: 30, energy: "medium" }),
   scheduleNotice: z.string().default(""),
   chatMessages: z.array(chatMessageSchema).default([]),
@@ -124,7 +118,6 @@ export const appStateSchema = z
 
 export type AssignmentInput = z.infer<typeof assignmentInputSchema>;
 export type Subtask = z.infer<typeof subtaskSchema>;
-export type Availability = z.infer<typeof availabilitySchema>;
 export type ScheduleBlock = z.infer<typeof scheduleBlockSchema>;
 export type CheckIn = z.infer<typeof checkInSchema>;
 export type Energy = z.infer<typeof energySchema>;

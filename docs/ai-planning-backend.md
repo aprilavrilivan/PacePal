@@ -38,14 +38,14 @@ Supported operations are:
 - task updates, additions, deletions, splitting, and merging;
 - task reordering and phase renaming;
 - dependency updates through task patches;
-- assignment and availability changes;
+- assignment changes;
 - deterministic schedule recalculation requests.
 
-The model receives the saved assignment, full task state, execution status, availability, and recent conversation. It is instructed to make the smallest sufficient change and preserve unaffected IDs.
+The model receives the saved assignment, full task state, execution status, and recent conversation. It is instructed to make the smallest sufficient change and preserve unaffected IDs.
 
 The engine applies the entire operation batch to a clone. Any invalid reference, dependency cycle, completed-task rewrite, duplicate new-task identifier, or no-op mutation rejects the whole batch. The source plan is never partially mutated. A successful data change increments `planVersion` and appends an operation summary to `planHistory`.
 
-Deletion and merging require an explicit confirmation state. Contradictory progress reports and ambiguous destructive requests return a conversational clarification with no operations. Pure progress updates cannot add or rewrite tasks. An infeasible availability change reports the numeric shortfall and waits for the user to choose a tradeoff instead of silently shrinking the work.
+Deletion and merging require an explicit confirmation state. Contradictory progress reports and ambiguous destructive requests return a conversational clarification with no operations. Pure progress updates cannot add or rewrite tasks.
 
 ## Failure behavior
 

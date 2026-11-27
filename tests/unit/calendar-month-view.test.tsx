@@ -20,7 +20,6 @@ function assignment(): Assignment {
   }));
 
   return {
-    availability: { dailyMinutes: 60, preferredTime: "09:00" },
     chatMessages: [],
     checkIn: { availableMinutes: 30, energy: "medium" },
     createdAt: "2026-11-01T00:00:00.000Z",
@@ -30,7 +29,7 @@ function assignment(): Assignment {
     priority: "medium",
     requirements: "",
     schedule: subtasks.map((task, index) => ({
-      date: "2026-11-27",
+      date: index < 3 ? "2026-11-27" : `2026-11-${25 + index}`,
       durationMinutes: 30,
       id: `block-${index + 1}`,
       locked: false,
@@ -38,10 +37,10 @@ function assignment(): Assignment {
       subtaskId: task.id,
     })),
     scheduleNotice: "",
+    scheduleVersion: 2,
     status: "scheduled",
     subtasks,
     title: "测试项目",
-    unscheduledMinutes: 0,
   };
 }
 
@@ -53,11 +52,13 @@ describe("calendar month view", () => {
 
   afterEach(() => vi.useRealTimers());
 
-  it("keeps every event in a scrollable day cell", () => {
+  it("lets the busiest day grow its week and connects consecutive project days", () => {
     const onSelectAssignment = vi.fn();
+    const onMoveSubtask = vi.fn();
     const { container } = render(
       <CalendarMonthView
         assignments={[assignment()]}
+        onMoveSubtask={onMoveSubtask}
         onSelectAssignment={onSelectAssignment}
       />,
     );
@@ -74,16 +75,43 @@ describe("calendar month view", () => {
     const events = container.querySelector(
       '[data-calendar-events="2026-11-27"]',
     );
-    expect(events).toHaveClass("overflow-y-auto");
-    expect(events).not.toHaveClass("overscroll-contain");
+    expect(events).not.toHaveClass("overflow-y-auto");
+    expect(container.querySelector('[data-date="2026-11-27"]')).not.toHaveClass(
+      "h-[180px]",
+    );
+    expect(
+      container.querySelector('[data-project-span="assignment-1"]'),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /任务 5/ }));
     expect(onSelectAssignment).toHaveBeenCalledWith("assignment-1");
+
+    const dataTransfer = {
+      dropEffect: "move",
+      effectAllowed: "move",
+      getData: vi.fn(() => "assignment-1::task-1"),
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByRole("button", { name: /任务 1/ }), {
+      dataTransfer,
+    });
+    fireEvent.drop(container.querySelector('[data-date="2026-11-30"]')!, {
+      dataTransfer,
+    });
+    expect(onMoveSubtask).toHaveBeenCalledWith(
+      "assignment-1",
+      "task-1",
+      "2026-11-30",
+    );
   });
 
   it("uses gray backgrounds for weekends but not out-of-month weekdays", () => {
     const { container } = render(
-      <CalendarMonthView assignments={[]} onSelectAssignment={vi.fn()} />,
+      <CalendarMonthView
+        assignments={[]}
+        onMoveSubtask={vi.fn()}
+        onSelectAssignment={vi.fn()}
+      />,
     );
 
     expect(container.querySelector('[data-date="2026-11-28"]')).toHaveClass(

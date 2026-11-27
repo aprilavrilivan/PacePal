@@ -1,18 +1,7 @@
-import type {
-  Availability,
-  ScheduleBlock,
-  Subtask,
-} from "@/features/pacepal/model";
+import type { ScheduleBlock, Subtask } from "@/features/pacepal/model";
 
 export type ScheduleResult = {
   blocks: ScheduleBlock[];
-  unscheduledMinutes: number;
-};
-
-export type DeadlineRisk = {
-  capacityMinutes: number;
-  remainingMinutes: number;
-  shortfallMinutes: number;
 };
 
 function toDateKey(date: Date) {
@@ -33,10 +22,14 @@ function fromDateKey(value: string) {
   return new Date(`${value}T00:00:00`);
 }
 
-function addMinutes(time: string, minutes: number) {
-  const [hours, initialMinutes] = time.split(":").map(Number);
-  const total = hours * 60 + initialMinutes + minutes;
-  return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+function minutesFromTime(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function timeFromMinutes(value: number) {
+  const normalized = Math.max(0, value) % 1_440;
+  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
 }
 
 function orderByDependencies(subtasks: Subtask[]) {
@@ -70,116 +63,135 @@ function orderByDependencies(subtasks: Subtask[]) {
   return ordered;
 }
 
+function schedulableTasks(subtasks: Subtask[]) {
+  const blocked = new Set<string>();
+  return orderByDependencies(subtasks).filter((subtask) => {
+    if (
+      subtask.status === "blocked" ||
+      subtask.dependencies.some((dependency) => blocked.has(dependency))
+    ) {
+      blocked.add(subtask.id);
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Gives every unfinished subtask exactly one calendar block. Tasks are spread
+ * one per day when the deadline allows it, then distributed across the
+ * remaining days in dependency order when there are more tasks than days.
+ */
 export function buildSchedule(
   subtasks: Subtask[],
   deadline: string,
-  availability: Availability,
   now = new Date(),
   existingBlocks: ScheduleBlock[] = [],
 ): ScheduleResult {
-  const deadlineDate = new Date(deadline);
   const startDate = new Date(now);
   startDate.setHours(0, 0, 0, 0);
-  deadlineDate.setHours(23, 59, 59, 999);
+  const parsedDeadline = new Date(deadline);
+  parsedDeadline.setHours(0, 0, 0, 0);
+  const deadlineDate =
+    parsedDeadline < startDate ? new Date(startDate) : parsedDeadline;
+  const dayCount =
+    Math.floor((deadlineDate.getTime() - startDate.getTime()) / 86_400_000) + 1;
+  const dates = Array.from({ length: dayCount }, (_, index) =>
+    toDateKey(addDays(startDate, index)),
+  );
+  const ordered = schedulableTasks(subtasks);
+  const taskById = new Map(ordered.map((task) => [task.id, task]));
+  const orderById = new Map(ordered.map((task, index) => [task.id, index]));
+  const existingByTask = new Map<string, ScheduleBlock>();
 
-  const ordered = orderByDependencies(subtasks);
-  const taskById = new Map(subtasks.map((subtask) => [subtask.id, subtask]));
-  const blocks: ScheduleBlock[] = existingBlocks
-    .filter((block) => {
-      const task = taskById.get(block.subtaskId);
-      return (
-        block.locked &&
-        task &&
-        task.status !== "completed" &&
-        task.status !== "blocked" &&
-        fromDateKey(block.date) >= startDate &&
-        fromDateKey(block.date) <= deadlineDate
-      );
-    })
-    .map((block) => ({ ...block, locked: true }));
-  const usedByDate = new Map<string, number>();
-  const lockedByTask = new Map<string, number>();
+  for (const block of [...existingBlocks].sort((left, right) =>
+    left.date.localeCompare(right.date),
+  )) {
+    if (!existingByTask.has(block.subtaskId)) {
+      existingByTask.set(block.subtaskId, block);
+    }
+  }
 
-  for (const block of blocks) {
-    usedByDate.set(
-      block.date,
-      (usedByDate.get(block.date) ?? 0) + block.durationMinutes,
+  const lockedByTask = new Map<string, ScheduleBlock>();
+  for (const block of existingBlocks) {
+    if (
+      !block.locked ||
+      lockedByTask.has(block.subtaskId) ||
+      !taskById.has(block.subtaskId) ||
+      fromDateKey(block.date) < startDate ||
+      fromDateKey(block.date) > deadlineDate
+    ) {
+      continue;
+    }
+    lockedByTask.set(block.subtaskId, { ...block, locked: true });
+  }
+
+  const blocks = [...lockedByTask.values()];
+  const occupiedDates = new Set(blocks.map((block) => block.date));
+
+  for (const [index, task] of ordered.entries()) {
+    if (lockedByTask.has(task.id)) continue;
+
+    const evenlyDistributedIndex =
+      ordered.length <= dayCount
+        ? index
+        : Math.floor((index * dayCount) / ordered.length);
+    const postponedIndex = task.postponedUntil
+      ? Math.max(
+          0,
+          Math.floor(
+            (fromDateKey(task.postponedUntil).getTime() - startDate.getTime()) /
+              86_400_000,
+          ),
+        )
+      : 0;
+    let dateIndex = Math.min(
+      dayCount - 1,
+      Math.max(evenlyDistributedIndex, postponedIndex),
     );
-    lockedByTask.set(
-      block.subtaskId,
-      (lockedByTask.get(block.subtaskId) ?? 0) + block.durationMinutes,
+
+    if (ordered.length <= dayCount) {
+      while (dateIndex < dayCount - 1 && occupiedDates.has(dates[dateIndex]!)) {
+        dateIndex += 1;
+      }
+    }
+
+    const previous = existingByTask.get(task.id);
+    const date = dates[dateIndex]!;
+    blocks.push({
+      date,
+      durationMinutes: task.estimatedMinutes,
+      id: previous?.id ?? `block-${task.id}`,
+      locked: false,
+      startTime: "09:00",
+      subtaskId: task.id,
+    });
+    occupiedDates.add(date);
+  }
+
+  const lockedEndByDate = new Map<string, number>();
+  for (const block of blocks.filter((block) => block.locked)) {
+    lockedEndByDate.set(
+      block.date,
+      Math.max(
+        lockedEndByDate.get(block.date) ?? 540,
+        minutesFromTime(block.startTime) + block.durationMinutes,
+      ),
     );
   }
 
-  let dayOffset = 0;
-  let blockIndex = blocks.length;
-  let unscheduledMinutes = 0;
-  const blockedDependencies = new Set<string>();
-  const usedBlockIds = new Set(blocks.map((block) => block.id));
-
-  for (const subtask of ordered) {
-    let taskMinutes = Math.max(
-      0,
-      subtask.estimatedMinutes - (lockedByTask.get(subtask.id) ?? 0),
-    );
-
-    if (
-      subtask.status === "blocked" ||
-      subtask.dependencies.some((dependency) =>
-        blockedDependencies.has(dependency),
-      )
-    ) {
-      blockedDependencies.add(subtask.id);
-      unscheduledMinutes += taskMinutes;
-      continue;
-    }
-
-    const earliestDate = subtask.postponedUntil
-      ? fromDateKey(subtask.postponedUntil)
-      : startDate;
-
-    while (taskMinutes > 0) {
-      const date = addDays(startDate, dayOffset);
-
-      if (date > deadlineDate) {
-        unscheduledMinutes += taskMinutes;
-        break;
-      }
-
-      if (date < earliestDate) {
-        dayOffset += 1;
-        continue;
-      }
-
-      const dateKey = toDateKey(date);
-      const usedToday = usedByDate.get(dateKey) ?? 0;
-      const availableToday = availability.dailyMinutes - usedToday;
-
-      if (availableToday <= 0) {
-        dayOffset += 1;
-        continue;
-      }
-
-      const durationMinutes = Math.min(taskMinutes, availableToday);
-      let blockId = "";
-      do {
-        blockIndex += 1;
-        blockId = `block-${blockIndex}-${subtask.id}`;
-      } while (usedBlockIds.has(blockId));
-      usedBlockIds.add(blockId);
-
-      blocks.push({
-        id: blockId,
-        subtaskId: subtask.id,
-        date: dateKey,
-        startTime: addMinutes(availability.preferredTime, usedToday),
-        durationMinutes,
-        locked: false,
-      });
-
-      taskMinutes -= durationMinutes;
-      usedByDate.set(dateKey, usedToday + durationMinutes);
-    }
+  const nextStartByDate = new Map(lockedEndByDate);
+  for (const block of blocks
+    .filter((block) => !block.locked)
+    .sort(
+      (left, right) =>
+        left.date.localeCompare(right.date) ||
+        (orderById.get(left.subtaskId) ?? 0) -
+          (orderById.get(right.subtaskId) ?? 0),
+    )) {
+    const start = nextStartByDate.get(block.date) ?? 540;
+    block.startTime = timeFromMinutes(start);
+    nextStartByDate.set(block.date, start + block.durationMinutes);
   }
 
   return {
@@ -188,32 +200,5 @@ export function buildSchedule(
         left.date.localeCompare(right.date) ||
         left.startTime.localeCompare(right.startTime),
     ),
-    unscheduledMinutes,
-  };
-}
-
-export function calculateDeadlineRisk(
-  subtasks: Subtask[],
-  deadline: string,
-  availability: Availability,
-  now = new Date(),
-): DeadlineRisk {
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(deadline);
-  end.setHours(23, 59, 59, 999);
-  const days = Math.max(
-    0,
-    Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1,
-  );
-  const remainingMinutes = subtasks
-    .filter((task) => task.status !== "completed")
-    .reduce((total, task) => total + task.estimatedMinutes, 0);
-  const capacityMinutes = days * availability.dailyMinutes;
-
-  return {
-    capacityMinutes,
-    remainingMinutes,
-    shortfallMinutes: Math.max(0, remainingMinutes - capacityMinutes),
   };
 }

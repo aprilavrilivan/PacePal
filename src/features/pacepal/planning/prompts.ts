@@ -71,8 +71,8 @@ Decision rules:
 - Use exact existing task IDs for existing tasks. New tasks need unique tempId values beginning with new-; dependencies may reference existing IDs or new tempIds from this response.
 - add_task, split_task, and merge_tasks descriptions must contain all fields. Use phase names consistent with the plan unless the user requests a new phase.
 - reorder_tasks may name only unfinished tasks and should include only the tasks whose relative order must change.
-- Include reschedule when status, dependency, duration, order, deadline, or availability changes should rebuild the calendar.
-- If the remaining work exceeds the user's stated available time, explain the numeric gap and realistic options, ask which option they prefer, and return no operations. Do not reduce task estimates, scope, or quality before the user chooses.
+- Include reschedule when status, dependency, duration, order, or deadline changes should rebuild the calendar.
+- If the user states an explicit total time constraint that is shorter than the remaining estimates, explain the numeric gap and realistic options, ask which option they prefer, and return no operations. Do not reduce task estimates, scope, or quality before the user chooses.
 - assistantMessage must accurately describe only changes represented by operations.
 - assistantMessage must be complete and self-contained. Never end after promising an explanation or list with phrases such as "如下", "具体做法如下", "核心区别可以这样讲", "as follows", or "here is". Include the actual explanation or list in the same response.
 - An explicit user request to rebuild, completely replace, or completely rearrange unfinished work is already confirmation: you MUST set confirmation=confirmed, preserve completed tasks, and rebuild only unfinished work. For a deletion, merge, or destructive change that is merely implied or proposed by you, set confirmation=requested, ask one focused confirmation question in assistantMessage, and return no operations.
@@ -252,7 +252,6 @@ export function refinementUserPrompt(
       language: assignment.language ?? null,
       planVersion: assignment.planVersion ?? 1,
     },
-    availability: assignment.availability,
     currentCheckIn: assignment.checkIn,
     tasks: assignment.subtasks.map((task) => ({
       id: task.id,
