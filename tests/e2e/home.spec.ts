@@ -217,9 +217,9 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   await expect(page.getByText("还没有任务拆解")).toHaveCount(0);
   await expect(page.getByText("理解任务要求", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { exact: true, name: "概览" }).click();
+  await page.getByRole("button", { exact: true, name: "专注" }).click();
 
-  await expect(page.getByRole("heading", { name: "当前推荐" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "专注" })).toBeVisible();
   await expect(
     page.getByText("“理解任务要求”已完成。", { exact: true }),
   ).toHaveCount(0);
@@ -289,7 +289,7 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   await expect(
     page.getByRole("progressbar", { name: "今日任务进度" }),
   ).toBeVisible();
-  await page.getByRole("heading", { name: "当前推荐" }).click();
+  await page.getByRole("heading", { name: "专注" }).click();
   await expect(
     page.getByRole("button", { name: "展开今日计划" }),
   ).toBeVisible();
@@ -327,6 +327,9 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   await page.getByRole("button", { exact: true, name: "任务" }).click();
   await expect(
     page.getByRole("progressbar", { name: "媒介研究课程论文完成进度" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "媒介研究课程论文截止倒计时" }),
   ).toBeVisible();
   await expect(page.getByLabel("媒介研究课程论文优先级")).toHaveValue("medium");
   const assistantPanel = page.getByRole("complementary", {
@@ -422,7 +425,10 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   await expect(page.getByText("资料检索与核实").first()).toBeVisible();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "当前推荐" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { exact: true, name: "任务" }),
+  ).toBeVisible();
+  await page.getByRole("button", { exact: true, name: "专注" }).click();
   await expect(
     page.getByRole("button", { name: "展开今日计划" }),
   ).toBeVisible();
@@ -580,8 +586,8 @@ test("grows busy calendar weeks, supports drag scheduling and ordering, and dist
     };
   });
 
-  expect(cellStyles.weekend?.cellClass).toContain("bg-slate-50/90");
-  expect(cellStyles.adjacentWeekday?.cellClass).toContain("bg-white");
+  expect(cellStyles.weekend?.cellClass).toContain("bg-slate-100/90");
+  expect(cellStyles.adjacentWeekday?.cellClass).toContain("bg-white/90");
   expect(cellStyles.adjacentWeekday?.cellClass).not.toContain("opacity-45");
   expect(cellStyles.adjacentWeekday?.numberClass).toContain("text-slate-400");
 });

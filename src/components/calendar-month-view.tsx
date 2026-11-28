@@ -272,9 +272,9 @@ export function CalendarMonthView({
   return (
     <section
       aria-label={`${monthTitle}日历`}
-      className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_12px_35px_rgba(39,39,76,0.06)]"
+      className="luxury-surface overflow-hidden rounded-[1.75rem]"
     >
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/70 bg-white/40 px-5 py-4 sm:px-6">
         <h2 className="text-xl font-semibold tracking-[-0.02em] text-slate-950">
           {monthTitle}
         </h2>
@@ -311,7 +311,7 @@ export function CalendarMonthView({
 
       <div className="overflow-x-auto">
         <div className="min-w-[800px]">
-          <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/70">
+          <div className="grid grid-cols-7 border-b border-white/70 bg-gradient-to-r from-violet-50/80 via-white/70 to-indigo-50/80">
             {weekdayLabels.map((label, index) => (
               <div
                 className={`px-3 py-2.5 text-center text-sm font-semibold ${
@@ -328,7 +328,7 @@ export function CalendarMonthView({
             {weeks.map((week) => {
               return (
                 <div
-                  className="relative grid grid-cols-7 gap-px bg-slate-200/80"
+                  className="relative grid grid-cols-7 gap-px bg-violet-100/70"
                   key={dateKey(week[0]!)}
                 >
                   {week.map((date) => {
@@ -353,7 +353,9 @@ export function CalendarMonthView({
                     return (
                       <div
                         className={`min-h-[10rem] min-w-0 p-2.5 transition ${
-                          isWeekend ? "bg-slate-50/90" : "bg-white"
+                          isWeekend
+                            ? "bg-slate-100/90"
+                            : "bg-white/90 backdrop-blur-sm"
                         } ${previewIndex !== null ? "ring-2 ring-violet-500 ring-inset" : ""}`}
                         data-date={key}
                         key={key}

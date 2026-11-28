@@ -153,13 +153,13 @@ describe("calendar month view", () => {
     );
 
     expect(container.querySelector('[data-date="2026-11-28"]')).toHaveClass(
-      "bg-slate-50/90",
+      "bg-slate-100/90",
     );
 
     const outOfMonthWeekday = container.querySelector(
       '[data-date="2026-10-26"]',
     );
-    expect(outOfMonthWeekday).toHaveClass("bg-white");
+    expect(outOfMonthWeekday).toHaveClass("bg-white/90");
     expect(outOfMonthWeekday).not.toHaveClass("opacity-45");
     expect(
       outOfMonthWeekday?.querySelector('time[datetime="2026-10-26"]'),
