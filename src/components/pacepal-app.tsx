@@ -282,6 +282,7 @@ export function PacePalApp() {
     [],
   );
   const todayPlanRef = useRef<HTMLElement | null>(null);
+  const focusSurfaceRef = useRef<HTMLElement | null>(null);
   const todayPlanDragRef = useRef<TodayPlanDragState | null>(null);
   const suppressTodayPlanClickRef = useRef(false);
   const userId = user?.id ?? null;
@@ -887,6 +888,8 @@ export function PacePalApp() {
     budgetMinutes: number,
   ) {
     const now = new Date();
+    const fullscreenRequest = focusSurfaceRef.current?.requestFullscreen?.();
+    fullscreenRequest?.catch(() => undefined);
     setFocusTimer((current) => {
       const sameTask =
         current?.assignmentId === assignmentId && current.subtaskId === id;
@@ -910,6 +913,9 @@ export function PacePalApp() {
     fallbackRemainingSeconds: number,
   ) {
     const now = new Date();
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
     setFocusTimer((current) =>
       current?.assignmentId === assignmentId && current.subtaskId === id
         ? {
@@ -2084,14 +2090,15 @@ export function PacePalApp() {
         {dashboardView === "overview" ? (
           <section className="space-y-5">
             <section
-              className={`${surfaceClassName} overflow-hidden p-3 sm:p-4`}
+              className={`${surfaceClassName} focus-immersive-shell overflow-hidden p-3 sm:p-4`}
+              ref={focusSurfaceRef}
             >
               {focusTimerRunning && recommendedTask ? (
                 <div
-                  className="flex min-h-[42rem] flex-col items-center justify-center gap-12 rounded-[1.4rem] bg-[radial-gradient(circle_at_top,rgba(99,102,241,0.24),transparent_34rem),linear-gradient(145deg,#151827,#090b13)] px-5 py-12 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.09),0_28px_70px_rgba(15,23,42,0.32)] sm:px-10 lg:min-h-[46rem] lg:px-16"
+                  className="fixed inset-0 z-[100] flex min-h-dvh flex-col items-center justify-center gap-16 overflow-hidden bg-[radial-gradient(circle_at_50%_8%,rgba(99,102,241,0.3),transparent_40rem),radial-gradient(circle_at_15%_90%,rgba(124,58,237,0.16),transparent_32rem),linear-gradient(145deg,#151827,#070912)] px-5 py-12 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.09)] sm:px-10 lg:px-16"
                   data-testid="focus-mode"
                 >
-                  <div className="w-full max-w-5xl">
+                  <div className="w-full max-w-6xl">
                     <FlipCountdown
                       immersive
                       isRunning
@@ -2221,10 +2228,6 @@ export function PacePalApp() {
                       </div>
 
                       <div className="hover-lift flex min-h-[25rem] flex-col items-center justify-center rounded-[1.75rem] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(99,102,241,0.24),transparent_24rem),linear-gradient(145deg,#171a29,#0b0d15)] px-4 py-8 text-white shadow-[0_28px_65px_rgba(15,23,42,0.3),inset_0_1px_0_rgba(255,255,255,0.1)] sm:px-8 sm:py-10">
-                        <div className="mb-7 flex items-center gap-2 text-sm font-semibold tracking-[0.08em] text-slate-400">
-                          <span className="size-2 rounded-full bg-slate-600" />
-                          <span>本轮专注倒计时</span>
-                        </div>
                         <FlipCountdown
                           isRunning={false}
                           remainingSeconds={focusRemainingSeconds}

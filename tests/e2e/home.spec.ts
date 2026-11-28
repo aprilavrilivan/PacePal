@@ -242,6 +242,12 @@ test("creates a project shell, generates its first breakdown in chat, and persis
     "aria-label",
     "倒计时 0小时30分0秒",
   );
+  await expect(page.getByText("本轮专注倒计时", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByText("小时", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("分钟", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("秒", { exact: true })).toHaveCount(0);
   await expect(
     page.getByRole("button", { exact: true, name: "延期" }),
   ).toHaveCount(0);
@@ -302,6 +308,21 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   );
   const focusMode = page.getByTestId("focus-mode");
   await expect(focusMode).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document.fullscreenElement?.classList.contains("focus-immersive-shell"),
+      ),
+    )
+    .toBe(true);
+  const focusBounds = await focusMode.boundingBox();
+  const viewport = page.viewportSize();
+  expect(focusBounds).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(focusBounds!.x).toBeLessThanOrEqual(1);
+  expect(focusBounds!.y).toBeLessThanOrEqual(1);
+  expect(focusBounds!.width).toBeGreaterThanOrEqual(viewport!.width - 2);
+  expect(focusBounds!.height).toBeGreaterThanOrEqual(viewport!.height - 2);
   await expect(focusMode.getByRole("button")).toHaveCount(1);
   await expect(
     focusMode.getByRole("button", { exact: true, name: "暂停" }),
@@ -312,6 +333,9 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   ).toHaveCount(0);
   await expect(page.getByRole("button", { name: "手动选择" })).toHaveCount(0);
   await page.getByRole("button", { exact: true, name: "暂停" }).click();
+  await expect
+    .poll(() => page.evaluate(() => document.fullscreenElement))
+    .toBe(null);
   await expect(focusMode).toHaveCount(0);
   await expect(
     page.getByRole("button", { exact: true, name: "继续" }),

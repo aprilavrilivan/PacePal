@@ -88,14 +88,6 @@ export function FlipCountdown({
           </div>
         ))}
       </div>
-      <div
-        aria-hidden="true"
-        className="mt-3 grid grid-cols-3 gap-7 px-2 text-center text-[0.7rem] font-semibold tracking-[0.22em] text-slate-500 uppercase sm:mt-4 sm:text-xs"
-      >
-        <span>小时</span>
-        <span>分钟</span>
-        <span>秒</span>
-      </div>
     </div>
   );
 }
