@@ -48,13 +48,12 @@ describe("local state ownership", () => {
               status: "todo",
             },
           ],
-          availability: { dailyMinutes: 60, preferredTime: "18:00" },
+          availability: { dailyMinutes: 60 },
           schedule: [
             {
               id: "block-1",
               subtaskId: "task-1",
               date: "2026-11-21",
-              startTime: "18:00",
               durationMinutes: 30,
             },
           ],
@@ -79,6 +78,7 @@ describe("local state ownership", () => {
       postponedUntil: null,
     });
     expect(state.assignments[0]?.schedule[0].locked).toBe(false);
+    expect("startTime" in state.assignments[0]!.schedule[0]!).toBe(false);
     expect("availability" in state.assignments[0]!).toBe(false);
     expect("unscheduledMinutes" in state.assignments[0]!).toBe(false);
   });

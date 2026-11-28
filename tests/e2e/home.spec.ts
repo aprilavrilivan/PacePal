@@ -216,7 +216,6 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   ).toBeVisible();
   await expect(page.getByText("还没有任务拆解")).toHaveCount(0);
   await expect(page.getByText("理解任务要求", { exact: true })).toBeVisible();
-
   await page.getByRole("button", { exact: true, name: "专注" }).click();
 
   await expect(page.getByRole("heading", { name: "专注" })).toBeVisible();
@@ -276,16 +275,14 @@ test("creates a project shell, generates its first breakdown in chat, and persis
   await page.waitForTimeout(180);
   await todayPlanTrigger.click();
   await expect(page.getByRole("heading", { name: "今日计划" })).toBeVisible();
-  await expect(page.getByText("09:00", { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel("开始时间")).toHaveCount(0);
 
   await page.getByRole("button", { name: "手动调整今日计划" }).click();
-  await page.getByLabel("开始时间").fill("10:15");
   await page
     .getByLabel(/今日计划分钟/)
     .first()
     .fill("25");
   await page.getByRole("button", { name: "保存今日计划" }).click();
-  await expect(page.getByText("10:15", { exact: true }).first()).toBeVisible();
   await expect(
     page.getByRole("progressbar", { name: "今日任务进度" }),
   ).toBeVisible();
@@ -498,11 +495,11 @@ test("grows busy calendar weeks, supports drag scheduling and ordering, and dist
               durationMinutes: 30,
               id: `calendar-block-${index + 1}`,
               locked: false,
-              startTime: `09:${String(index * 10).padStart(2, "0")}`,
+              order: index,
               subtaskId: task.id,
             })),
             scheduleNotice: "",
-            scheduleVersion: 2,
+            scheduleVersion: 3,
             status: "scheduled",
             subtasks: tasks,
             title: "日历滚动测试",
@@ -519,6 +516,9 @@ test("grows busy calendar weeks, supports drag scheduling and ordering, and dist
 
   const events = page.locator(`[data-calendar-events="${todayKey}"]`);
   await expect(events.locator("button")).toHaveCount(5);
+  await expect(events.locator("button").first()).not.toHaveAccessibleName(
+    /^\d{2}:\d{2}/,
+  );
   await expect(page.getByText(/还有 \d+ 项/)).toHaveCount(0);
   await expect(events).not.toHaveClass(/overflow-y-auto/);
   await expect

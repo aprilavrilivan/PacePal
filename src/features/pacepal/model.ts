@@ -47,9 +47,9 @@ export const scheduleBlockSchema = z.object({
   id: z.string().min(1),
   subtaskId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  startTime: z.string().regex(/^\d{2}:\d{2}$/),
   durationMinutes: z.number().int().positive(),
   locked: z.boolean().default(false),
+  order: z.number().int().min(0).default(0),
 });
 
 export const checkInSchema = z.object({
@@ -83,7 +83,7 @@ export const assignmentSchema = assignmentInputSchema.extend({
   status: z.enum(["planning", "scheduled"]),
   subtasks: z.array(subtaskSchema),
   schedule: z.array(scheduleBlockSchema),
-  scheduleVersion: z.literal(2).optional(),
+  scheduleVersion: z.union([z.literal(2), z.literal(3)]).optional(),
   checkIn: checkInSchema.default({ availableMinutes: 30, energy: "medium" }),
   scheduleNotice: z.string().default(""),
   chatMessages: z.array(chatMessageSchema).default([]),

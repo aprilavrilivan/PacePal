@@ -140,12 +140,6 @@ function currentDateKey() {
   return `${year}-${month}-${day}`;
 }
 
-function addMinutesToTime(value: string, minutes: number) {
-  const [hours, initialMinutes] = value.split(":").map(Number);
-  const total = hours * 60 + initialMinutes + minutes;
-  return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-}
-
 function settleActiveTime(task: Subtask, now = new Date()): Subtask {
   if (!task.activeSince) return task;
   const elapsed = Math.max(
@@ -183,7 +177,7 @@ function rebuildAssignmentSchedule(
   return {
     ...assignment,
     schedule: result.blocks,
-    scheduleVersion: 2,
+    scheduleVersion: 3,
     scheduleNotice,
   };
 }
@@ -192,7 +186,7 @@ function normalizeSchedules(state: AppState, now = new Date()): AppState {
   return {
     ...state,
     assignments: state.assignments.map((assignment) =>
-      assignment.scheduleVersion === 2
+      assignment.scheduleVersion === 3
         ? assignment
         : rebuildAssignmentSchedule(assignment, "", now),
     ),
@@ -284,7 +278,6 @@ export function PacePalApp() {
     bottom: 24,
     right: 24,
   });
-  const [todayPlanStartTime, setTodayPlanStartTime] = useState("09:00");
   const [todayPlanDraft, setTodayPlanDraft] = useState<TodayPlanDraftItem[]>(
     [],
   );
@@ -628,7 +621,7 @@ export function PacePalApp() {
       status: "scheduled",
       subtasks: [],
       schedule: [],
-      scheduleVersion: 2,
+      scheduleVersion: 3,
       checkIn: { availableMinutes: 30, energy: "medium" },
       scheduleNotice: "",
       chatMessages: [],
@@ -819,7 +812,7 @@ export function PacePalApp() {
       ...current,
       status: "scheduled",
       schedule: result.blocks,
-      scheduleVersion: 2,
+      scheduleVersion: 3,
       scheduleNotice: "",
     }));
     setDashboardView("overview");
@@ -1069,7 +1062,6 @@ export function PacePalApp() {
   }
 
   function openTodayPlanEditor() {
-    setTodayPlanStartTime(todayBlocks[0]?.block.startTime ?? "09:00");
     setTodayPlanDraft(
       todayBlocks.map(({ assignment: item, block }) => ({
         assignmentId: item.id,
@@ -1123,20 +1115,14 @@ export function PacePalApp() {
   }
 
   function saveTodayPlan() {
-    if (!/^\d{2}:\d{2}$/.test(todayPlanStartTime)) return;
     const today = currentDateKey();
-    let elapsedMinutes = 0;
-    const normalized = todayPlanDraft.map((item) => {
-      const block = {
-        ...item,
-        date: today,
-        durationMinutes: Math.max(5, item.durationMinutes),
-        locked: true,
-        startTime: addMinutesToTime(todayPlanStartTime, elapsedMinutes),
-      };
-      elapsedMinutes += block.durationMinutes;
-      return block;
-    });
+    const normalized = todayPlanDraft.map((item, order) => ({
+      ...item,
+      date: today,
+      durationMinutes: Math.max(5, item.durationMinutes),
+      locked: true,
+      order,
+    }));
 
     setAppState((current) => ({
       ...current,
@@ -1157,7 +1143,7 @@ export function PacePalApp() {
             durationMinutes: block.durationMinutes,
             id: block.blockId,
             locked: block.locked,
-            startTime: block.startTime,
+            order: block.order,
             subtaskId: block.subtaskId,
           })),
         ];
@@ -1171,7 +1157,7 @@ export function PacePalApp() {
           ...item,
           schedule: result.blocks,
           scheduleNotice: "",
-          scheduleVersion: 2 as const,
+          scheduleVersion: 3 as const,
         };
       }),
     }));
@@ -1196,7 +1182,7 @@ export function PacePalApp() {
         .sort(
           (left, right) =>
             left.block.date.localeCompare(right.block.date) ||
-            left.block.startTime.localeCompare(right.block.startTime) ||
+            left.block.order - right.block.order ||
             left.assignmentIndex - right.assignmentIndex,
         );
       const entryKey = (entry: (typeof entries)[number]) =>
@@ -1238,32 +1224,21 @@ export function PacePalApp() {
       }
 
       const updates = new Map<string, Assignment["schedule"][number]>();
-      const normalize = (
-        targetDate: string,
-        ordered: typeof targetOrder,
-        startAt: number,
-      ) => {
-        let elapsed = startAt;
-        for (const entry of ordered) {
+      const normalize = (targetDate: string, ordered: typeof targetOrder) => {
+        for (const [order, entry] of ordered.entries()) {
           updates.set(`${entry.assignmentId}::${entry.block.id}`, {
             ...entry.block,
             date: targetDate,
             locked: true,
-            startTime: addMinutesToTime("00:00", elapsed),
+            order,
           });
-          elapsed += entry.block.durationMinutes;
         }
       };
-      const firstStart = (ordered: typeof targetOrder) =>
-        ordered.reduce((earliest, entry) => {
-          const [hours, minutes] = entry.block.startTime.split(":").map(Number);
-          return Math.min(earliest, hours * 60 + minutes);
-        }, 540);
 
       if (sourceDate !== date) {
-        normalize(sourceDate, sourceEntries, firstStart(sourceEntries));
+        normalize(sourceDate, sourceEntries);
       }
-      normalize(date, targetOrder, firstStart(targetEntries));
+      normalize(date, targetOrder);
 
       return {
         ...current,
@@ -1279,10 +1254,10 @@ export function PacePalApp() {
               .sort(
                 (left, right) =>
                   left.date.localeCompare(right.date) ||
-                  left.startTime.localeCompare(right.startTime),
+                  left.order - right.order,
               ),
             scheduleNotice: "日历安排已手动调整",
-            scheduleVersion: 2,
+            scheduleVersion: 3,
           };
         }),
       };
@@ -1976,7 +1951,7 @@ export function PacePalApp() {
     .sort(
       (left, right) =>
         left.block.date.localeCompare(right.block.date) ||
-        left.block.startTime.localeCompare(right.block.startTime),
+        left.block.order - right.block.order,
     );
   const todayBlocks = globalSchedule.filter(
     ({ block }) => block.date === currentDateKey(),
@@ -2073,7 +2048,7 @@ export function PacePalApp() {
       >
         <div className="flex flex-col gap-5 pb-7 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="bg-gradient-to-r from-slate-950 via-violet-950 to-indigo-700 bg-clip-text text-3xl font-semibold tracking-[-0.04em] text-transparent drop-shadow-[0_1px_0_rgba(255,255,255,0.8)] sm:text-[2.5rem]">
+            <h1 className="premium-heading bg-gradient-to-r from-slate-950 via-violet-950 to-indigo-700 bg-clip-text text-3xl font-semibold tracking-[-0.04em] text-transparent drop-shadow-[0_1px_0_rgba(255,255,255,0.8)] sm:text-[2.5rem]">
               {viewTitles[dashboardView]}
             </h1>
           </div>
@@ -2160,8 +2135,7 @@ export function PacePalApp() {
                           </button>
                           {recommendedBlock ? (
                             <p className="mt-6 text-sm font-semibold text-slate-500">
-                              {formatScheduleDate(recommendedBlock.date)} ·{" "}
-                              {recommendedBlock.startTime}
+                              {formatScheduleDate(recommendedBlock.date)}
                             </p>
                           ) : null}
                         </div>
@@ -2360,7 +2334,6 @@ export function PacePalApp() {
                           </button>
                           <button
                             className={primaryButtonClassName}
-                            disabled={!/^\d{2}:\d{2}$/.test(todayPlanStartTime)}
                             onClick={saveTodayPlan}
                             type="button"
                           >
@@ -2408,20 +2381,6 @@ export function PacePalApp() {
 
                   {todayPlanEditing ? (
                     <div className="mt-5">
-                      <div className="mb-5 max-w-56">
-                        <FormField label="开始时间">
-                          <input
-                            className={fieldClassName}
-                            id="today-plan-start-time"
-                            onChange={(event) =>
-                              setTodayPlanStartTime(event.target.value)
-                            }
-                            required
-                            type="time"
-                            value={todayPlanStartTime}
-                          />
-                        </FormField>
-                      </div>
                       <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                         {todayPlanDraft.map((draft, index) => {
                           const item = assignments.find(
@@ -2540,12 +2499,9 @@ export function PacePalApp() {
                       <ul className="mt-4 divide-y divide-slate-100">
                         {todayBlocks.map(({ assignment: item, block }) => (
                           <li
-                            className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 py-3.5"
+                            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3.5"
                             key={`${item.id}-${block.id}`}
                           >
-                            <span className="text-sm font-semibold text-slate-500">
-                              {block.startTime}
-                            </span>
                             <span className="min-w-0">
                               <span className="block truncate font-semibold text-slate-800">
                                 {item.subtasks.find(
@@ -2662,16 +2618,16 @@ export function PacePalApp() {
                 const selected = item.id === assignment.id;
                 return (
                   <article
-                    className={`hover-lift relative min-h-52 overflow-hidden rounded-[1.6rem] border backdrop-blur-xl transition ${
+                    className={`premium-task-card hover-lift relative min-h-52 overflow-hidden rounded-[1.6rem] border backdrop-blur-2xl transition ${
                       selected
-                        ? "border-violet-300/80 bg-[radial-gradient(circle_at_top_right,rgba(167,139,250,0.28),transparent_14rem),linear-gradient(145deg,rgba(255,255,255,0.98),rgba(243,238,255,0.94))] shadow-[0_22px_55px_rgba(91,85,223,0.18),inset_0_1px_0_white]"
-                        : "border-white/80 bg-[linear-gradient(145deg,rgba(255,255,255,0.96),rgba(248,248,255,0.88))] shadow-[0_16px_40px_rgba(67,56,126,0.1),inset_0_1px_0_white] hover:border-violet-200"
+                        ? "border-indigo-300/80 bg-[linear-gradient(145deg,rgba(255,255,255,0.98),rgba(238,242,255,0.9))] shadow-[0_22px_55px_rgba(67,56,202,0.18),inset_0_1px_0_white]"
+                        : "border-white/90 bg-[linear-gradient(145deg,rgba(255,255,255,0.94),rgba(245,247,255,0.8))] shadow-[0_1px_2px_rgba(31,41,79,0.05),0_18px_42px_rgba(53,51,112,0.1),inset_0_1px_0_white] hover:border-indigo-200"
                     }`}
                     key={item.id}
                   >
                     <button
                       aria-pressed={selected}
-                      className="flex min-h-52 w-full flex-col p-5 text-left focus:ring-4 focus:ring-violet-500/10 focus:outline-none focus:ring-inset"
+                      className="flex min-h-52 w-full flex-col p-6 text-left focus:ring-4 focus:ring-violet-500/10 focus:outline-none focus:ring-inset"
                       onClick={() => selectAssignment(item.id, "tasks")}
                       type="button"
                     >
@@ -2955,22 +2911,20 @@ export function PacePalApp() {
                   className={`${surfaceClassName} flex min-h-[620px] flex-col overflow-hidden xl:sticky xl:top-6 xl:max-h-[calc(100dvh-3rem)]`}
                   id="task-ai-panel"
                 >
-                  <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
+                  <div className="flex items-center justify-between gap-4 border-b border-white/10 bg-[radial-gradient(circle_at_85%_0%,rgba(99,102,241,0.25),transparent_18rem),linear-gradient(135deg,#171a2d,#101326)] px-5 py-4 text-white sm:px-6">
                     <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 font-bold text-violet-700">
+                      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/10 font-bold text-violet-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
                         AI
                       </div>
                       <div className="min-w-0">
-                        <h2 className="font-semibold text-slate-950">
-                          PacePal
-                        </h2>
-                        <p className="truncate text-sm font-medium text-slate-500">
+                        <h2 className="font-semibold text-white">PacePal</h2>
+                        <p className="truncate text-sm font-medium text-slate-400">
                           {assignment.title}
                         </p>
                       </div>
                     </div>
                     <button
-                      className={textButtonClassName}
+                      className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white focus:ring-4 focus:ring-violet-400/20 focus:outline-none"
                       onClick={() => setTaskAdjustmentMode(null)}
                       type="button"
                     >
@@ -2980,7 +2934,7 @@ export function PacePalApp() {
 
                   <div
                     aria-live="polite"
-                    className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50/60 px-5 py-6 sm:px-6"
+                    className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-[radial-gradient(circle_at_top_right,rgba(199,210,254,0.24),transparent_22rem),linear-gradient(145deg,rgba(248,250,252,0.88),rgba(244,244,255,0.76))] px-5 py-6 sm:px-6"
                   >
                     {assignment.chatMessages.length === 0 ? (
                       <div className="max-w-[88%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 leading-7 text-slate-700 shadow-sm">
@@ -3001,8 +2955,8 @@ export function PacePalApp() {
                         <div
                           className={`max-w-[88%] rounded-2xl px-4 py-3 leading-7 shadow-sm ${
                             message.role === "user"
-                              ? "rounded-tr-md bg-[#5b55df] text-white"
-                              : "rounded-tl-md border border-slate-200 bg-white text-slate-700"
+                              ? "rounded-tr-md bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-[0_12px_28px_rgba(79,70,229,0.24),inset_0_1px_0_rgba(255,255,255,0.2)]"
+                              : "rounded-tl-md border border-white/90 bg-white/[0.82] text-slate-700 shadow-[0_8px_22px_rgba(53,51,112,0.09),inset_0_1px_0_white] backdrop-blur-xl"
                           }`}
                         >
                           <p className="whitespace-pre-wrap">
@@ -3042,7 +2996,7 @@ export function PacePalApp() {
                     ) : null}
                   </div>
 
-                  <div className="border-t border-slate-100 bg-white p-4 sm:p-5">
+                  <div className="border-t border-white/80 bg-white/75 p-4 backdrop-blur-2xl sm:p-5">
                     {assignment.subtasks.length > 0 ? (
                       <div className="mb-3 flex flex-wrap gap-2">
                         {[
@@ -3134,12 +3088,12 @@ function WorkspaceFrame({
 
   return (
     <div className="luxury-shell">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-white/70 bg-white/72 px-4 py-6 shadow-[18px_0_60px_rgba(67,56,126,0.08)] backdrop-blur-2xl lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col overflow-hidden border-r border-white/10 bg-[radial-gradient(circle_at_20%_0%,rgba(99,102,241,0.3),transparent_18rem),linear-gradient(165deg,rgba(20,24,45,0.97),rgba(10,13,27,0.98))] px-4 py-6 shadow-[22px_0_70px_rgba(26,25,58,0.22),inset_-1px_0_0_rgba(255,255,255,0.06)] backdrop-blur-2xl lg:flex">
         <div className="flex items-center gap-3 px-2">
           <span className="flex size-10 items-center justify-center rounded-2xl border border-white/30 bg-gradient-to-br from-violet-500 via-[#5b55df] to-indigo-700 text-lg font-bold text-white shadow-[0_12px_28px_rgba(91,85,223,0.38),inset_0_1px_0_rgba(255,255,255,0.35)]">
             P
           </span>
-          <span className="text-xl font-semibold tracking-[-0.03em] text-slate-950">
+          <span className="text-xl font-semibold tracking-[-0.03em] text-white">
             PacePal
           </span>
         </div>
@@ -3152,8 +3106,8 @@ function WorkspaceFrame({
                 aria-current={active ? "page" : undefined}
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left font-semibold transition focus:ring-4 focus:ring-violet-500/10 focus:outline-none ${
                   active
-                    ? "border border-white/80 bg-gradient-to-r from-violet-100/90 to-indigo-50/80 text-violet-800 shadow-[0_10px_26px_rgba(91,85,223,0.13),inset_0_1px_0_white]"
-                    : "border border-transparent text-slate-500 hover:border-white/80 hover:bg-white/70 hover:text-violet-900 hover:shadow-[0_9px_24px_rgba(67,56,126,0.08)]"
+                    ? "border border-white/15 bg-white/[0.12] text-white shadow-[0_14px_32px_rgba(0,0,0,0.24),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-xl"
+                    : "border border-transparent text-slate-300 hover:border-white/10 hover:bg-white/[0.08] hover:text-white"
                 }`}
                 key={item.view}
                 onClick={() => onNavigate(item.view)}
@@ -3167,15 +3121,15 @@ function WorkspaceFrame({
         </nav>
 
         <div className="mt-auto space-y-2">
-          <p className="px-3 text-xs font-semibold text-slate-400">
+          <p className="px-3 text-xs font-semibold text-slate-500">
             {syncLabel}
           </p>
           <button
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
+            className="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-left font-semibold text-slate-300 transition hover:border-white/10 hover:bg-white/[0.08] hover:text-white focus:ring-4 focus:ring-violet-400/20 focus:outline-none"
             onClick={onAccount}
             type="button"
           >
-            <span className="flex size-8 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-600">
+            <span className="flex size-8 items-center justify-center rounded-full border border-white/10 bg-white/10 text-sm font-bold text-white shadow-inner">
               {accountLabel.slice(0, 1).toUpperCase()}
             </span>
             <span className="min-w-0 truncate">{accountLabel}</span>

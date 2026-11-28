@@ -22,16 +22,6 @@ function fromDateKey(value: string) {
   return new Date(`${value}T00:00:00`);
 }
 
-function minutesFromTime(value: string) {
-  const [hours, minutes] = value.split(":").map(Number);
-  return hours * 60 + minutes;
-}
-
-function timeFromMinutes(value: number) {
-  const normalized = Math.max(0, value) % 1_440;
-  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
-}
-
 function orderByDependencies(subtasks: Subtask[]) {
   const completed = new Set(
     subtasks
@@ -163,42 +153,16 @@ export function buildSchedule(
       durationMinutes: task.estimatedMinutes,
       id: previous?.id ?? `block-${task.id}`,
       locked: false,
-      startTime: "09:00",
+      order: previous?.order ?? orderById.get(task.id) ?? 0,
       subtaskId: task.id,
     });
     occupiedDates.add(date);
   }
 
-  const lockedEndByDate = new Map<string, number>();
-  for (const block of blocks.filter((block) => block.locked)) {
-    lockedEndByDate.set(
-      block.date,
-      Math.max(
-        lockedEndByDate.get(block.date) ?? 540,
-        minutesFromTime(block.startTime) + block.durationMinutes,
-      ),
-    );
-  }
-
-  const nextStartByDate = new Map(lockedEndByDate);
-  for (const block of blocks
-    .filter((block) => !block.locked)
-    .sort(
-      (left, right) =>
-        left.date.localeCompare(right.date) ||
-        (orderById.get(left.subtaskId) ?? 0) -
-          (orderById.get(right.subtaskId) ?? 0),
-    )) {
-    const start = nextStartByDate.get(block.date) ?? 540;
-    block.startTime = timeFromMinutes(start);
-    nextStartByDate.set(block.date, start + block.durationMinutes);
-  }
-
   return {
     blocks: blocks.sort(
       (left, right) =>
-        left.date.localeCompare(right.date) ||
-        left.startTime.localeCompare(right.startTime),
+        left.date.localeCompare(right.date) || left.order - right.order,
     ),
   };
 }

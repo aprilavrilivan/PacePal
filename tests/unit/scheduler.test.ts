@@ -94,7 +94,7 @@ describe("buildSchedule", () => {
           durationMinutes: 60,
           id: "manual-research",
           locked: true,
-          startTime: "14:00",
+          order: 0,
           subtaskId: "research",
         },
       ],
@@ -103,7 +103,7 @@ describe("buildSchedule", () => {
     expect(result.blocks).toHaveLength(2);
     expect(
       result.blocks.find((block) => block.id === "manual-research"),
-    ).toMatchObject({ date: "2026-11-22", locked: true, startTime: "14:00" });
+    ).toMatchObject({ date: "2026-11-22", locked: true, order: 0 });
     expect(
       result.blocks.filter((block) => block.subtaskId === "research"),
     ).toHaveLength(1);
@@ -121,7 +121,7 @@ describe("buildSchedule", () => {
           durationMinutes: 60,
           id: "legacy-1",
           locked: false,
-          startTime: "09:00",
+          order: 0,
           subtaskId: source.id,
         },
         {
@@ -129,7 +129,7 @@ describe("buildSchedule", () => {
           durationMinutes: 60,
           id: "legacy-2",
           locked: false,
-          startTime: "09:00",
+          order: 0,
           subtaskId: source.id,
         },
       ],

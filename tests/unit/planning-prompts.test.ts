@@ -45,7 +45,7 @@ function splitAssignment(): Assignment {
       }),
     ],
     schedule: [],
-    scheduleVersion: 2,
+    scheduleVersion: 3,
     checkIn: { availableMinutes: 30, energy: "medium" },
     scheduleNotice: "",
     chatMessages: [],

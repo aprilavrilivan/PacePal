@@ -68,7 +68,7 @@ function assignment(): Assignment {
     status: "scheduled",
     subtasks: plan.subtasks,
     schedule: [],
-    scheduleVersion: 2,
+    scheduleVersion: 3,
     checkIn: { availableMinutes: 30, energy: "medium" },
     scheduleNotice: "",
     chatMessages: [],

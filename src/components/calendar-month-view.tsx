@@ -69,7 +69,7 @@ function DropSlot({
   return (
     <div
       aria-hidden="true"
-      className="h-[3.25rem] shrink-0 rounded-md border-2 border-dashed border-violet-400 bg-violet-50 shadow-inner transition-all duration-150"
+      className="h-[3.25rem] shrink-0 rounded-xl border-2 border-dashed border-violet-400 bg-violet-50/80 shadow-inner transition-all duration-150"
       data-drop-placeholder={date}
       onDragOver={(event) => {
         event.preventDefault();
@@ -135,7 +135,7 @@ export function CalendarMonthView({
     for (const entries of grouped.values()) {
       entries.sort(
         (left, right) =>
-          left.block.startTime.localeCompare(right.block.startTime) ||
+          left.block.order - right.block.order ||
           left.subtaskTitle.localeCompare(right.subtaskTitle, "zh-CN"),
       );
     }
@@ -274,21 +274,21 @@ export function CalendarMonthView({
       aria-label={`${monthTitle}日历`}
       className="luxury-surface overflow-hidden rounded-[1.75rem]"
     >
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/70 bg-white/40 px-5 py-4 sm:px-6">
-        <h2 className="text-xl font-semibold tracking-[-0.02em] text-slate-950">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 bg-[radial-gradient(circle_at_80%_0%,rgba(99,102,241,0.26),transparent_22rem),linear-gradient(135deg,#171a2d,#0d1020)] px-5 py-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] sm:px-6">
+        <h2 className="text-xl font-semibold tracking-[-0.02em] text-white">
           {monthTitle}
         </h2>
         <div className="flex items-center gap-2">
           <button
             aria-label="上个月"
-            className="flex size-9 items-center justify-center rounded-full bg-slate-100 text-lg font-semibold text-slate-700 transition hover:bg-slate-200 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
+            className="flex size-9 items-center justify-center rounded-full border border-white/10 bg-white/10 text-lg font-semibold text-white shadow-inner transition hover:bg-white/20 focus:ring-4 focus:ring-violet-400/25 focus:outline-none"
             onClick={() => changeMonth(-1)}
             type="button"
           >
             <span aria-hidden="true">‹</span>
           </button>
           <button
-            className="min-h-9 rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
+            className="min-h-9 rounded-full border border-white/10 bg-white/10 px-4 text-sm font-semibold text-white shadow-inner transition hover:bg-white/20 focus:ring-4 focus:ring-violet-400/25 focus:outline-none"
             onClick={() =>
               setVisibleMonth(
                 new Date(today.getFullYear(), today.getMonth(), 1),
@@ -300,7 +300,7 @@ export function CalendarMonthView({
           </button>
           <button
             aria-label="下个月"
-            className="flex size-9 items-center justify-center rounded-full bg-slate-100 text-lg font-semibold text-slate-700 transition hover:bg-slate-200 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
+            className="flex size-9 items-center justify-center rounded-full border border-white/10 bg-white/10 text-lg font-semibold text-white shadow-inner transition hover:bg-white/20 focus:ring-4 focus:ring-violet-400/25 focus:outline-none"
             onClick={() => changeMonth(1)}
             type="button"
           >
@@ -311,7 +311,7 @@ export function CalendarMonthView({
 
       <div className="overflow-x-auto">
         <div className="min-w-[800px]">
-          <div className="grid grid-cols-7 border-b border-white/70 bg-gradient-to-r from-violet-50/80 via-white/70 to-indigo-50/80">
+          <div className="grid grid-cols-7 border-b border-white/70 bg-gradient-to-r from-indigo-50/90 via-white/85 to-violet-50/90 shadow-[inset_0_-1px_0_rgba(99,102,241,0.06)]">
             {weekdayLabels.map((label, index) => (
               <div
                 className={`px-3 py-2.5 text-center text-sm font-semibold ${
@@ -328,7 +328,7 @@ export function CalendarMonthView({
             {weeks.map((week) => {
               return (
                 <div
-                  className="relative grid grid-cols-7 gap-px bg-violet-100/70"
+                  className="relative grid grid-cols-7 gap-px bg-indigo-100/70"
                   key={dateKey(week[0]!)}
                 >
                   {week.map((date) => {
@@ -388,7 +388,7 @@ export function CalendarMonthView({
                           <time
                             className={`flex size-7 items-center justify-center rounded-full text-sm font-semibold ${
                               isToday
-                                ? "bg-[#5b55df] text-white"
+                                ? "bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-[0_6px_16px_rgba(79,70,229,0.35)]"
                                 : !isCurrentMonth || isWeekend
                                   ? "text-slate-400"
                                   : "text-slate-700"
@@ -436,8 +436,8 @@ export function CalendarMonthView({
                                 ) : null}
                                 <button
                                   aria-hidden={isDragged || undefined}
-                                  aria-label={`${entry.block.startTime} ${entry.subtaskTitle}，属于${entry.assignmentTitle}`}
-                                  className={`block max-h-20 w-full cursor-grab overflow-hidden rounded-md border px-2 py-1.5 text-left transition-all duration-150 hover:brightness-95 focus:ring-2 focus:ring-violet-500/30 focus:outline-none active:cursor-grabbing ${
+                                  aria-label={`${entry.subtaskTitle}，属于${entry.assignmentTitle}`}
+                                  className={`block max-h-20 w-full cursor-grab overflow-hidden rounded-xl border px-2.5 py-2 text-left shadow-[0_5px_14px_rgba(51,65,85,0.08),inset_0_1px_0_rgba(255,255,255,0.8)] transition-all duration-150 hover:-translate-y-0.5 hover:shadow-[0_8px_18px_rgba(51,65,85,0.12)] hover:brightness-[0.98] focus:ring-2 focus:ring-violet-500/30 focus:outline-none active:cursor-grabbing ${
                                     completed ? "opacity-55" : ""
                                   } ${isDragged ? "pointer-events-none max-h-0 border-0 py-0 opacity-0" : ""}`}
                                   draggable={!completed}
@@ -491,7 +491,6 @@ export function CalendarMonthView({
                                       completed ? "line-through" : ""
                                     }`}
                                   >
-                                    {entry.block.startTime} ·{" "}
                                     {entry.subtaskTitle}
                                   </span>
                                   <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] font-medium opacity-75">

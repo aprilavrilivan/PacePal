@@ -67,7 +67,7 @@ function assignment(
     status: "scheduled",
     subtasks: [task],
     title: id,
-    scheduleVersion: 2,
+    scheduleVersion: 3,
   };
 }
 
